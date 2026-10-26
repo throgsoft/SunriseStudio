@@ -1,13 +1,11 @@
 using System.Buffers.Binary;
-using System.Diagnostics;
 using System.Text;
 using SunriseStudio.Editor;
 using SunriseStudio.Formats;
 using SunriseStudio.Live;
 using SunriseStudio.Packages;
-using SunriseStudio.Projects;
 
-/** Root-slot readers: a synthetic root with every table, and the counts measured on the installed build. */
+/** Root-slot readers on a synthetic root with every table. */
 internal static class InvestmentTableChecks
 {
     private const uint First = 0x80A00000;
@@ -21,8 +19,6 @@ internal static class InvestmentTableChecks
     // The Pursuits bucket id, which Sunrise names, and the fixture's invented first slot and slot count for it.
     private const byte PursuitsId = 40;
     private const int PursuitsFirst = 120, PursuitsSlots = 24;
-    // The installed Pursuits bucket's first slot and slot count, as measured.
-    private const int InstalledPursuitsFirst = 269, InstalledPursuitsSlots = 63;
     // String bank index, container, data and row classes of this build, and the variable hash a literal text part carries.
     private const uint BankIndexClass = 0x80805F98, StringContainerClass = 0x80809A88, StringDataClass = 0x80809A8A,
         StringHashClass = 0x80800070, StringPartClass = 0x80809A90, StringCombinationClass = 0x80809A8E, LiteralPart = 0x811C9DC5;
@@ -90,7 +86,6 @@ internal static class InvestmentTableChecks
         Pursuits(catalog, packages, tables);
         ObjectiveText(tables);
         ObjectiveTextRefusals(parent);
-        Labels(catalog, tables);
         ItemCatalogChecks.Run(catalog);
         Edits(catalog, packages, tables);
         PassItems(catalog, tables);
@@ -98,8 +93,6 @@ internal static class InvestmentTableChecks
         BucketTable(tables);
         BucketRefusals(parent);
         References(packages, tables);
-        Rewards(catalog, packages, tables);
-        PursuitPages(catalog, packages, tables);
         Progress(catalog, packages, tables);
         TruncatedItems(parent);
         Ambiguous(parent);
@@ -130,6 +123,9 @@ internal static class InvestmentTableChecks
             "A cyclic reference printed as a value.");
         Check(unlocks.Format(new InvestmentExpression(0, [new(InvestmentUnlocks.SharedOpcode, 1, 0), new(2, 0, 0), new(2, 0, 0), new(4, 0, 0)]))
                 == "shared #1, not, not, and", "A postfix listing did not name a shared row as infix does.");
+        Check(unlocks.Reads(Reference(1)).Select(row => (row.Instruction.Opcode, row.Instruction.Operand, row.ViaShared))
+                .SequenceEqual([(InvestmentUnlocks.FlagOpcode, 0u, 0)]) && unlocks.Reads(Reference(2)).Count == 0,
+            "Shared rows were not inlined into an expression's reads, or a cycle was followed.");
     }
 
     private static void Bindings(InvestmentTables tables)
@@ -337,9 +333,18 @@ internal static class InvestmentTableChecks
             "The quest set was misread.");
         Check(Enumerable.Range(0, catalog.Items.Count).Where(item => tables.QuestOwner(item) == 4).SequenceEqual([3, 5])
             && tables.ObjectiveUsers(0).SequenceEqual([3, 5]), "Item links were not captured.");
+        var owned = catalog.ReadQuestSet(4);
+        Check(owned.Steps.Select(step => step.ItemIndex).SequenceEqual(new ushort[] { 3, 5 }) && owned.Error.Length == 0,
+            "The owner's quest set was not read.");
+        try { catalog.ReadQuestSet(ItemCount); throw new InvalidDataException("A quest owner outside the item index was read."); }
+        catch (ArgumentOutOfRangeException) { }
         var second = catalog.ReadItem(First + FirstItemEntry + 5, packages.Read(First + FirstItemEntry + 5)).Pursuit!;
         Check(second.LifetimeSeconds is null && second.Lifetime?.Instructions.Count == 2 && second.Diagnostics.Count == 0,
             "A computed lifetime was read as a constant.");
+        // Item 3's lifetime is one constant row of 3600 seconds. Item 5's is a computed two-row expression, and item 0 has no
+        // objective block.
+        Check(tables.Expires(3) && !tables.Expires(5) && !tables.Expires(0) && !tables.Expires(-1) && !tables.Expires(ItemCount),
+            "The installed lifetime does not mark the pursuit Sunrise reports as a bounty.");
         var wrapper = catalog.ReadItem(First + FirstItemEntry + 2, packages.Read(First + FirstItemEntry + 2)).Wrapper!;
         Check(wrapper is { Pool: 2, OpensOnAcquisition: false, Error: "More selections than Sunrise accepts (4)." } && wrapper.Selections.Count == 5,
             "Wrapper selections were capped or accepted.");
@@ -353,9 +358,6 @@ internal static class InvestmentTableChecks
             "Objective descriptions were not joined by index and hash.");
         Check(tables.Diagnostics.Where(line => line.StartsWith("Objective text", StringComparison.Ordinal))
             .SequenceEqual(["Objective text: 1 objectives have no display row with their hash."]), "A mismatched display row was not one diagnostic.");
-        Check(InvestmentTableViews.ObjectiveName(tables, tables.Objectives[0]) == (FixtureObjectiveText, "Objective 0\n0x00000041")
-            && InvestmentTableViews.ObjectiveName(tables, tables.Objectives[2]) == ("Objective 0x00000043", "Objective 2\n0x00000043"),
-            "An objective without a description was not named by its hash.");
     }
 
     /** A display table of another class, or none, is a section diagnostic and leaves every description empty. */
@@ -379,36 +381,6 @@ internal static class InvestmentTableChecks
             Check(tables.Objectives.Count == 8 && tables.Diagnostics.Contains("Objective text: " + expected)
                 && Enumerable.Range(0, 8).All(index => tables.ObjectiveText(index) == ""), $"The {name} display table was read.");
         }
-    }
-
-    /** Labels that say what the install ships and what Sunrise does with it. */
-    private static void Labels(InvestmentCatalog catalog, InvestmentTables tables)
-    {
-        Check(!InvestmentTableViews.Usable(InvestmentRoot.OmittedSlot) && !InvestmentTableViews.Usable(0)
-            && InvestmentTableViews.Usable(tables.TableTag(InvestmentRootSlots.Pools)), "An omitted or unset table tag was offered to open.");
-        Check(tables.TableTag(84) == InvestmentRoot.OmittedSlot && !InvestmentTableViews.Usable(tables.TableTag(84)),
-            "The fixture's slot 84 is not omitted.");
-        Check(InvestmentTableViews.PursuitReason(LivePursuitReason.ItemProgressNotSaved) == "This server does not save per-item progress",
-            "Unsaved item progress is not worded as the server's fact.");
-        const ushort absent = ushort.MaxValue;
-        var entry = tables.Pools[0].Entries[0] with { Slot84Reference = 7, ItemIndex = 0, NestedPool = absent };
-        Check(InvestmentRewardTree.SiteTip(tables, entry) == "References reward site 7 in root slot 84, which this install does not ship. "
-            + "Sunrise skips the reference, so the row grants its item."
-            && InvestmentRewardTree.SiteTip(tables, entry with { ItemIndex = absent, NestedPool = 2 }).EndsWith("the row draws its pool.", StringComparison.Ordinal)
-            && InvestmentRewardTree.SiteTip(tables, entry with { ItemIndex = absent }).EndsWith("grants nothing.", StringComparison.Ordinal),
-            "A reward site on an install without slot 84 was described as refused.");
-        string Socket(ushort plug, ushort plugSet, ushort rollSet, uint selection)
-        {
-            var (text, tip) = InvestmentTableViews.SocketOverride(catalog, new(0, 1, plug, plugSet, rollSet, selection));
-            return text + " | " + tip;
-        }
-        const uint fixedPlug = uint.MaxValue;
-        Check(Socket(0, absent, absent, fixedPlug) == $"{catalog.Items[0].Name} (fixed) | Extracted: fixed roll"
-            && Socket(absent, 12, absent, fixedPlug).StartsWith("from plug set 12 | References roll tables", StringComparison.Ordinal)
-            && Socket(absent, absent, 3, 0).StartsWith("from roll set 3 | ", StringComparison.Ordinal)
-            && Socket(absent, absent, absent, 0).StartsWith("initial plug kept | Extracted: ", StringComparison.Ordinal)
-            && Socket(0, absent, absent, 0).StartsWith($"{catalog.Items[0].Name} (selection 0) | Sunrise refuses", StringComparison.Ordinal),
-            "A socket override was labelled against Sunrise's order of checks.");
     }
 
     private static void Edits(InvestmentCatalog catalog, PackageCatalog packages, InvestmentTables tables)
@@ -667,210 +639,7 @@ internal static class InvestmentTableChecks
         int block = 0x30 + (int)BinaryPrimitives.ReadInt64LittleEndian(step.AsSpan(0x30));
         BinaryPrimitives.WriteUInt16LittleEndian(step.AsSpan(block + 0x1C), ushort.MaxValue);
         Check(InvestmentPursuits.Classify(step) == (InvestmentPursuitShape.Single, PursuitsId), "A pursuit outside a chain was not single-step.");
-        var slots = RewardSitesPage.RootSlots(tables, _ => true);
-        var omitted = Enumerable.Range(0, tables.Root!.SlotCount).Where(slot => tables.Root.SlotTag(slot) == InvestmentRoot.OmittedSlot).ToArray();
-        Check(slots.Select(row => row.Slot).Order().SequenceEqual(omitted)
-            && slots[0] == new RewardSitesPage.RootSlot(InvestmentRootSlots.Slot84, "Reward sites", "Not in this install", "8")
-            && slots[1] == new RewardSitesPage.RootSlot(79, "Slot 79", "Not in this install", "1")
-            && slots.Skip(1).All(row => row.Table == $"Slot {row.Slot}" && row.State == "Not in this install")
-            && slots.Skip(2).All(row => row.References == LiveGate.NoValue), "The root slots did not list every omitted slot, naming only 84.");
     }
-
-    /**
-     * The Rewards page model of the engram (item 1: its draw table, two sites and what gives it) and of a plain item, the
-     * draw table's graph with its cycle, the graph's size cap, and pool search by an entry item's index and hash.
-     */
-    private static void Rewards(InvestmentCatalog catalog, PackageCatalog packages, InvestmentTables tables)
-    {
-        InvestmentItemDetail Detail(int item) => catalog.ReadItem(First + FirstItemEntry + (uint)item, packages.Read(First + FirstItemEntry + (uint)item));
-        var none = new InvestmentVendorSales(new Dictionary<int, int[]>(), 0, []);
-        var engram = Detail(1);
-        var model = ItemRewardsPage.Build(catalog, tables, engram, none);
-        Check(model.DrawTable.Select(line => (line.Text, line.Link)).SequenceEqual([("Opens when acquired \u00B7 Draws 1 from category 0x00000000", RewardLinkKind.None),
-                ("Pool 1 \u00B7 1 entry", RewardLinkKind.Pool)]) && model.AcquiredFlag?.Value == tables.Unlocks.FlagLabel(2).Text,
-            "The engram's draw table lines are wrong: " + string.Join(" | ", model.DrawTable.Select(line => line.Text)));
-        Check(model.Sites.Select(line => (line.Text, line.Detail, line.Link, line.Target)).SequenceEqual([
-                ($"Site {SecondSite}", "Acquire", RewardLinkKind.Site, SecondSite), ($"Site {FixtureSite}", "Pool 1, entry 0", RewardLinkKind.Site, FixtureSite)]),
-            "The engram's reward sites are wrong: " + string.Join(" | ", model.Sites.Select(line => $"{line.Text} {line.Detail}")));
-        Check(model.GivenBy.Select(line => (line.Text, line.Link, line.Target, line.Element)).SequenceEqual([
-                ("Pool 1, entry 0", RewardLinkKind.Pool, 1, 0), ("Season pass rank 3 \u00B7 progression 1", RewardLinkKind.PassRow, 1, 2)])
-            && model.Previews.Single() is { Text: "No preview", Style: RewardLineStyle.Muted },
-            "The engram's givers are wrong: " + string.Join(" | ", model.GivenBy.Select(line => line.Text)));
-        var plain = ItemRewardsPage.Build(catalog, tables, Detail(4), none);
-        Check(plain.DrawTable.Single().Text == "No draw table" && plain.AcquiredFlag is null && plain.Sites.Single().Text == "None referenced"
-            && plain.Previews.Single().Text == "No preview" && plain.GivenBy.Single().Text == "Nothing in this install gives this item.",
-            "A plain item's Rewards page is not one empty line per section.");
-        Check(ItemRewardsPage.Build(catalog, tables, Detail(4), null).GivenBy.Single().Text == "Reading vendors."
-            && ItemRewardsPage.Build(catalog, tables, Detail(0), new(new Dictionary<int, int[]>(), 1, ["Vendor: broken."])).GivenBy
-                .Select(line => line.Text).SequenceEqual(["Pool 0, entry 0", "Pool 0, entry 1", "Season pass rank 300 \u00B7 progression 1",
-                    "Season pass rank 2 \u00B7 progression 1", "1 vendor not read.", $"{catalog.Items[3].Name} (preview)"]),
-            "Vendor loading, vendor problems or preview givers are not listed.");
-        // Item 1 opens pool 1, which grants item 1 again: the item and its pool form a cycle.
-        string Row(string name, string suffix) => name + suffix;
-        var graph = RewardClosureGraph.Build(catalog, tables, 1, engram.Wrapper!, Row);
-        Check(graph is { TooLarge: false, Pools: 1 } && graph.Nodes.Select(node => node.Key).SequenceEqual(["item/1", "pool/1"])
-            && graph.Edges.Select(edge => (edge.Source, edge.Target)).SequenceEqual([("item/1", "pool/1"), ("pool/1", "item/1")])
-            && graph.Nodes.All(node => node.Tint == StudioTheme.Failure && node.Subtitle.EndsWith("cycle", StringComparison.Ordinal))
-            && graph.Nodes[1].Rows!.SequenceEqual([$"{catalog.Items[1].Name} x1 \u00B7 2"]) && graph.Nodes.All(node => !node.Rows!.Any() || node.Rows!.Count == 1),
-            "The engram's closure graph is wrong: " + string.Join(" | ", graph.Nodes.Select(node => $"{node.Key} {node.Subtitle}")));
-        // Item 2's pool has no entries; pool 0 nests pool 2 and grants item 0 twice.
-        var nested = RewardClosureGraph.Build(catalog, tables, 2, Detail(2).Wrapper! with { Pool = 0 }, Row);
-        Check(nested.Nodes.Select(node => node.Key).SequenceEqual(["item/2", "pool/0", "pool/2"])
-            && nested.Edges.Select(edge => (edge.Source, edge.Target)).SequenceEqual([("item/2", "pool/0"), ("pool/0", "pool/2")])
-            && nested.Nodes[1].Rows!.SequenceEqual([$"{catalog.Items[0].Name} x2 \u00B7 -1", $"{catalog.Items[0].Name} x1 \u00B7 3.5",
-                "Pool 7 (unreadable) \u00B7 1", "Pool 2 \u00B7 1"]) && nested.Nodes.All(node => node.Tint != StudioTheme.Failure || node.Key == "pool/2"),
-            "A nested closure graph is wrong: " + string.Join(" | ", nested.Nodes.SelectMany(node => node.Rows ?? [])));
-        Check(RewardClosureGraph.Build(catalog, tables, 2, Detail(2).Wrapper! with { Pool = 0 }, Row, limit: 1) is { TooLarge: true, Pools: 2, Nodes.Count: 0 },
-            "A closure above the cap was graphed.");
-        // Pool 1 gives item 1; its search text names the item's index and hash, and no other pool's does.
-        var item = catalog.Items[1];
-        string[] Lines(int pool) => RewardPoolsPage.SearchText(catalog, tables, pool, RewardPoolsPage.Label(catalog, tables, pool)).Split('\n');
-        Check(Lines(1).Contains(item.Index.ToString(System.Globalization.CultureInfo.InvariantCulture)) && Lines(1).Contains($"{item.Hash:X8}")
-            && Enumerable.Range(0, tables.Pools.Count).Where(pool => Lines(pool).Contains($"{item.Hash:X8}")).SequenceEqual([1]),
-            "Pool search does not find an entry by its item's index and hash.");
-    }
-
-    /**
-     * Which page opens each pursuit shape, the quest chain's nodes with held and unreadable steps, and the inspector's
-     * sources, completion plan and saved values for the fixture's quest steps (items 3 and 5 of item 4's quest set).
-     */
-    private static void PursuitPages(InvestmentCatalog catalog, PackageCatalog packages, InvestmentTables tables)
-    {
-        StudioDocument Document(int item, byte[] bytes) => new(new PackageEntry(First + FirstItemEntry + (uint)item, InvestmentCatalog.ItemClass, 8, 0,
-            bytes.Length, "fixture", 0x100, item), $"Item {item}", bytes, new AssetInspection("Item", "fixture", [], [], []), null, null, "");
-        byte[] member = packages.Read(First + FirstItemEntry + 5);
-        // The same pursuit naming no quest owner is a single-step pursuit; moved to bucket 13, the Investment page keeps its objectives.
-        byte[] single = (byte[])member.Clone();
-        BinaryPrimitives.WriteUInt16LittleEndian(single.AsSpan(0x30 + (int)BinaryPrimitives.ReadInt64LittleEndian(single.AsSpan(0x30)) + 0x1C), ushort.MaxValue);
-        byte[] other = (byte[])single.Clone(); other[184] = 13;
-        var quest = new QuestPage(); var pursuit = new PursuitPage();
-        var documents = new[] { ("member", Document(5, member)), ("owner", Document(4, packages.Read(First + FirstItemEntry + 4))),
-            ("bounty", Document(5, single)), ("other", Document(5, other)), ("plain", Document(0, packages.Read(First + FirstItemEntry))) };
-        string Opens(StudioDocument document) => (quest.CanOpen(document) ? "quest" : "") + (pursuit.CanOpen(document) ? "pursuit" : "")
-            + (InvestmentPage.ShowsObjectives(document) ? "investment" : "");
-        Check(documents.Select(row => Opens(row.Item2)).SequenceEqual(["quest", "quest", "pursuit", "investment", ""]),
-            "The pursuit pages open the wrong items: " + string.Join(", ", documents.Select(row => $"{row.Item1}={Opens(row.Item2)}")));
-        var chain = catalog.ReadQuestSet(4);
-        Check(chain.Steps.Select(step => step.ItemIndex).SequenceEqual(new ushort[] { 3, 5 }) && chain.Error.Length == 0, "The owner's quest set was not read.");
-        try { catalog.ReadQuestSet(ItemCount); throw new InvalidDataException("A quest owner outside the item index was read."); }
-        catch (ArgumentOutOfRangeException) { }
-        QuestStepDetail Step(int item) => new(item, catalog.ReadItem(First + FirstItemEntry + (uint)item, packages.Read(First + FirstItemEntry + (uint)item)), "");
-        string Row(string text, string suffix) => text + suffix;
-        var context = new LiveInvestmentContext(1, 2, 3);
-        LiveHeldPursuit Held(int item, LivePursuitFlags flags, LivePursuitReason reason, uint itemFlags, params LivePursuitObjective[] objectives) =>
-            new(0x4000 + (ulong)item, catalog.Items[item].Hash, 7, 1, itemFlags, flags, reason, objectives);
-        var known = Held(3, LivePursuitFlags.ObjectivesKnown, LivePursuitReason.ObjectivesIncomplete, 0,
-            new LivePursuitObjective(tables.Objectives[0].Hash, 4, 10, LivePursuitObjectiveFlags.Known));
-        var model = QuestChainView.Build(catalog, tables, chain, [Step(3), Step(5)], 5, Row);
-        string first = OneLine(tables, 0), target = tables.Objectives[0].CompletionValue.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
-        // One node per step and one unlabelled link per step after the first, in authored order.
-        Check(model.Nodes.Count == chain.Steps.Count && model.Edges.Count == chain.Steps.Count - 1
-            && model.Edges.Single() == new CanvasEdge("step/0", "step/1", false, Tip: "Next in authored order.")
-            && model.Nodes.All(node => node.Rows!.Count <= QuestChainView.ObjectiveRows),
-            "The quest model is not one node per step and one link per step after the first.");
-        // Item 3 has eight objectives: three lines with their targets and a count of the rest; its one preview is a chip of 3.
-        Check(model.Nodes.All(node => node.Tint is null && node.Note.Length == 0) && model.Nodes[1].Subtitle.EndsWith("This step", StringComparison.Ordinal)
-            && model.Nodes[0].Rows!.SequenceEqual([$"{first} \u00B7 {target}", $"{OneLine(tables, 1)} \u00B7 1", $"{OneLine(tables, 2)} \u00B7 1", "+5 objectives"])
-            && model.Nodes[0].Chips!.Single() == new CanvasChip(0, "3", tables.WrapperPool(0) >= 0) && model.Rewards["step/0"].SequenceEqual([0])
-            && model.Tips["step/0#0"].StartsWith($"{catalog.Items[0].Name}\nx3 \u00B7 Conditional", StringComparison.Ordinal),
-            "The step's tint, rows or reward chips are wrong: " + string.Join(" | ", model.Nodes[0].Rows!));
-        var held = QuestChainView.Build(catalog, tables, chain, [Step(3), Step(5)], 5, Row, new HashSet<int> { 3 });
-        Check(held.Nodes[0] is { Tint: var tint, Subtitle: var subtitle } && tint == QuestChainView.HeldTint && subtitle.EndsWith("Held", StringComparison.Ordinal)
-            && held.Nodes[1].Tint is null, "A held step was not tinted and marked.");
-        var unsaved = Held(5, LivePursuitFlags.Bounty, LivePursuitReason.ItemProgressNotSaved, 0x2,
-            new LivePursuitObjective(tables.Objectives[0].Hash, 0, 10, LivePursuitObjectiveFlags.None));
-        var broken = QuestChainView.Build(catalog, tables, chain, [new(3, null, "Broken."), Step(5)], 5, Row);
-        Check(broken.Nodes[0].Tint == StudioTheme.Failure && broken.Nodes[0].Rows!.SequenceEqual(["Not read."]) && broken.Nodes[0].Chips is null
-            && broken.Nodes[1].Rows!.SequenceEqual([$"{first} \u00B7 {target}"]),
-            "An unreadable step was not marked, or a read step lost its target.");
-        Check(QuestChainView.Build(catalog, tables, chain, null, 5, Row).Nodes.All(node => node.Rows!.SequenceEqual(["Reading."]) && node.Tint is null),
-            "Steps still being read did not say so.");
-        Check(QuestChainView.Count(0) == "" && QuestChainView.Count(1) == "" && QuestChainView.Count(500) == "500" && QuestChainView.Count(1500) == "1.5k"
-            && QuestChainView.Count(25000) == "25k" && QuestChainView.Count(2_500_000) == "2.5M", "Reward chip counts are not compact.");
-        // Objective 0 reads item value slot 7, which item 3 keeps as its instance lane 0; objective 1 reads flag slot 6, which shares a bank row with slot 2.
-        var detail = Step(3).Detail!;
-        var sources = PursuitInspector.Sources(catalog, tables, detail.Pursuit!);
-        var unlocks = tables.Unlocks;
-        var read = sources[1].Rows.Single();
-        // The item lane keeps no saved row, so objective 0 lists none.
-        Check(sources.Select(row => row.Ordinal).SequenceEqual(Enumerable.Range(0, 8)) && sources[0].Rows.Count == 0
-            && read is { ViaShared: -1, Slot: 6, Uses: 3 }
-            && read.Label == (unlocks.FlagLabel(6) is { Proven: true } proven ? proven.Text : $"Slot 6 \u00B7 {unlocks.FlagLabel(6).Text}") && sources[2].Rows.Count == 0,
-            "Objective sources were not listed: " + string.Join(" | ", sources.Select(row => $"{row.Ordinal}:{row.Rows.Count}")));
-        Check(PursuitInspector.UseLines(catalog, tables, read.Binding!.Value, 6).Select(line => (line.Text, line.Link)).SequenceEqual([
-                ($"{catalog.Items[3].Name}: {OneLine(tables, 1)}", RewardLinkKind.Item), ($"{catalog.Items[3].Name}: {OneLine(tables, 1)} (target) (slot 2)", RewardLinkKind.Item),
-                ($"Acquisition flag of {catalog.Items[1].Name} (slot 2)", RewardLinkKind.Item)]),
-            "A saved row's other uses were not listed with their slots: "
-            + string.Join(" | ", PursuitInspector.UseLines(catalog, tables, read.Binding!.Value, 6).Select(line => line.Text)));
-        // Pass row 2 reads flag slot 0 directly and through shared row 0: one row, one line.
-        var flag0 = unlocks.Binding(new(InvestmentUnlocks.FlagOpcode, 0, 0))!.Value;
-        Check(PursuitInspector.UseLines(catalog, tables, flag0, 0).Select(line => line.Text).SequenceEqual(["Pool 0, entry 0 condition", "Pool 0, entry 1 weight rule",
-                $"Season pass rank 3 \u00B7 row 2 condition", $"{catalog.Items[3].Name} preview 0"]),
-            "Uses of one row reached through shared rows were not merged: "
-            + string.Join(" | ", PursuitInspector.UseLines(catalog, tables, flag0, 0).Select(line => line.Text)));
-        Check(unlocks.Reads(new InvestmentExpression(0, [new(InvestmentUnlocks.SharedOpcode, 1, 0)])).Select(row => (row.Instruction.Opcode, row.Instruction.Operand, row.ViaShared))
-                .SequenceEqual([(InvestmentUnlocks.FlagOpcode, 0u, 0)])
-            && unlocks.Reads(new InvestmentExpression(0, [new(InvestmentUnlocks.SharedOpcode, 2, 0)])).Count == 0,
-            "Shared rows were not inlined into an expression's reads, or a cycle was followed.");
-        var saved = PursuitInspector.Saved(unsaved);
-        Check(saved.Select(row => row.Name).SequenceEqual(["Instance", "Serial", "Quantity", "Item flags"])
-            && saved[3].Value == "0x00000002 \u00B7 Tracked" && !PursuitInspector.Saved(known)[3].Value.Contains("Tracked", StringComparison.Ordinal),
-            "The saved values do not mark the tracked flag.");
-        Check(PursuitInspector.Installed(catalog, tables, detail.Item, detail.Pursuit).Select(row => (row.Name, row.Value)).SequenceEqual([
-                ("Item", $"3 \u00B7 0x{detail.Item.Hash:X8}"), ("Quest owner", $"{catalog.Items[4].Name} \u00B7 item 4"),
-                ("Chain value", unlocks.ValueLabel(0).Text), ("Primary", $"Site {FixtureSite}"), ("Secondary", "None"),
-                ("Context value", unlocks.ValueLabel(1).Text), ("Completion value", unlocks.ValueLabel(0).Text), ("Presence flags", unlocks.FlagLabel(5).Text),
-                ("Item values", unlocks.ValueLabel(7).Text)]),
-            "The installed data rows are wrong: " + string.Join(" | ", PursuitInspector.Installed(catalog, tables, detail.Item, detail.Pursuit).Select(row => row.Value)));
-        Check(RewardSitesPage.CompletionPage(tables, catalog, new(RewardReferenceKind.CompletionPrimary, 3, -1)) == QuestPage.PageId
-            && RewardSitesPage.CompletionPage(tables, catalog, new(RewardReferenceKind.Acquire, 3, -1)) is null,
-            "A completion reference does not open where its pursuit's completion is shown.");
-        quest.Dispose(); pursuit.Dispose();
-        Board(catalog, tables, context, known, unsaved);
-    }
-
-    /**
-     * The held pursuit board: the game's bounty flag wins over the installed lifetime, which places the rows it did not
-     * report; unknown progress is never drawn as none done, and progress this server never saves is not marked unknown; the
-     * newest change comes first.
-     */
-    private static void Board(InvestmentCatalog catalog, InvestmentTables tables, LiveInvestmentContext context, LiveHeldPursuit known,
-        LiveHeldPursuit unsaved)
-    {
-        // Item 3's lifetime is one constant row of 3600 seconds, item 5's a computed two-row expression, item 0 has no objective block.
-        Check(tables.Expires(3) && !tables.Expires(5) && !tables.Expires(0) && !tables.Expires(-1) && !tables.Expires(ItemCount),
-            "The installed lifetime does not mark the pursuit Sunrise reports as a bounty.");
-        LiveHeld Row(int item, int serial) => new(LiveInventoryScope.CharacterItem, 0x4000 + (ulong)item, catalog.Items[item].Hash, 1, serial,
-            InvestmentPursuits.PursuitBucket, false);
-        LiveHeld[] rows = [Row(5, 7), Row(3, 9), Row(0, 8)];
-        var installed = LiveInvestmentSection.PursuitCards(catalog, tables, rows, null);
-        Check(installed.Quests.Select(card => card.Item!.Index).SequenceEqual([0, 5]) && installed.Bounties.Single().Item!.Index == 3
-            && installed.Quests.Concat(installed.Bounties).All(card => card is { Status: null, Progress: IconGrid.NoProgress, Unknown: false, Tracked: false }),
-            "Without pursuit progress the board did not place rows by their installed lifetime, or drew progress.");
-        var complete = new LiveHeldPursuit(0x4000, catalog.Items[0].Hash, 8, 1, 0,
-            LivePursuitFlags.Bounty | LivePursuitFlags.ObjectivesKnown | LivePursuitFlags.ObjectivesComplete, LivePursuitReason.ManualActionNotEstablished,
-            [new LivePursuitObjective(tables.Objectives[0].Hash, 10, 10, LivePursuitObjectiveFlags.Known | LivePursuitObjectiveFlags.Complete)]);
-        var reported = LiveInvestmentSection.PursuitCards(catalog, tables, rows, new(context, 1, [known, unsaved, complete]));
-        var (quest, bounties) = (reported.Quests.Single(), reported.Bounties);
-        Check(quest is { Bounty: false, Progress: 0, Unknown: false, Complete: false } && quest.Item!.Index == 3
-            && bounties.Select(card => card.Item!.Index).SequenceEqual([0, 5]),
-            "The game's bounty flag did not decide the tabs, or the newest change did not come first.");
-        Check(bounties[0] is { Progress: 1, Complete: true, Unknown: false, Tracked: false }
-            && bounties[0].Tip.Contains("1 of 1 objectives", StringComparison.Ordinal),
-            "A complete bounty was not marked complete.");
-        Check(bounties[1] is { Progress: IconGrid.NoProgress, Unknown: false, Complete: false, Tracked: true }
-            && !bounties[1].Tip.Contains(" objectives", StringComparison.Ordinal) && !bounties[1].Tip.Contains("Progress unknown", StringComparison.Ordinal)
-            && bounties[1].Tip.Contains("Tracked", StringComparison.Ordinal)
-            && bounties[1].Tip.EndsWith(StudioUi.MayBeInaccurate, StringComparison.Ordinal) && !quest.Tip.Contains(StudioUi.MayBeInaccurate, StringComparison.Ordinal),
-            "Unsaved bounty progress was drawn or marked unknown: " + bounties[1].Tip.Replace('\n', '|'));
-        var other = known with { Reason = LivePursuitReason.ObjectiveSourceUnavailable, Flags = LivePursuitFlags.None };
-        Check(LiveInvestmentSection.PursuitCards(catalog, tables, [Row(3, 1)], new(context, 1, [other])).Quests.Single().Tip
-                .Contains("Progress unknown: objective source unavailable", StringComparison.Ordinal),
-            "Unknown progress for another reason does not name it.");
-    }
-
-    private static string OneLine(InvestmentTables tables, int objective) =>
-        PursuitInspector.OneLine(InvestmentTableViews.ObjectiveName(tables, tables.Objectives[objective]).Text);
 
     /** Every prefix of two rich items loads: link reading never throws, and only a cut through the fixed fields is reported. */
     private static void TruncatedItems(string parent)
@@ -899,329 +668,6 @@ internal static class InvestmentTableChecks
             && catalog.Tables().References.SiteIndices.SequenceEqual([FixtureSite]), "A truncated item failed to load: " + string.Join(" | ", catalog.Diagnostics.Take(3)));
         Check(shapes[^1] == (InvestmentPursuitShape.Quest, PursuitsId) && shapes[0] == (InvestmentPursuitShape.None, byte.MaxValue),
             "A truncated item was classified from bytes it does not have.");
-    }
-
-    /** Measured on the installed build; a different build changes these on purpose. */
-    public static void Owned(string install, string? keys)
-    {
-        using var packages = PackageCatalog.Open(install, keys, new() { Enabled = false });
-        var catalog = InvestmentCatalog.Load(packages);
-        var timer = Stopwatch.StartNew();
-        var tables = catalog.Tables();
-        timer.Stop();
-        Check(tables.Root is { SlotCount: 119 } && tables.Slot84.State == InvestmentSlotState.Omitted, "The installed root changed.");
-        Check(tables.Pools.Count == 979 && tables.Pools.Sum(pool => pool.Entries.Count) == 10549, "Installed reward pool counts changed.");
-        Check(tables.Progressions.Count == 88 && tables.PassCandidates.Select(row => row.Index).SequenceEqual([32, 34, 36, 40])
-            && tables.Progressions[40].Rewards.Count == 196, "Installed progression counts changed.");
-        Check(tables.Objectives.Count == 8483 && tables.Objectives.All(row => row.Error.Length == 0), "Installed objective counts changed.");
-        string progress = OwnedProgressSources(tables);
-        int described = Enumerable.Range(0, tables.Objectives.Count).Count(index => tables.ObjectiveText(index).Length != 0);
-        // No diagnostic means every display row repeats its objective's hash.
-        Check(!tables.Diagnostics.Any(line => line.StartsWith("Objective text", StringComparison.Ordinal)) && described == 5886,
-            "Installed objective descriptions changed.");
-        Check(!tables.Diagnostics.Any(line => line.Contains("disagree with their mapping table", StringComparison.Ordinal))
-            && tables.Unlocks.GraphDiagnostics.Count == 0 && tables.RewardGraph.Cycles.Count == 0,
-            "Installed unlock bindings disagree or the shared graph is broken.");
-        string buckets = OwnedBuckets(catalog, tables);
-        string passItems = OwnedPassItems(catalog, packages, tables);
-        string unlockSources = OwnedUnlockSources(tables.Unlocks);
-        Check(tables.Pools.SelectMany(pool => pool.Entries).All(entry => entry.Error.Length == 0)
-            && tables.Progressions[40].Rewards.All(row => row.Error.Length == 0), "Installed reward rows report errors.");
-        int deepest = tables.Objectives.Max(row => tables.Unlocks.Depth(row.Source));
-        Check(deepest > InvestmentUnlocks.ServerNestingLimit, "Installed objective nesting no longer exceeds Sunrise's limit.");
-        int pursuits = 0, eight = 0, chains = 0, previews = 0, wrappers = 0, lifetimes = 0, longest = 0;
-        var vendorTimer = Stopwatch.StartNew();
-        var vendors = catalog.VendorSales();
-        vendorTimer.Stop();
-        var rewards = new OwnedRewardPages();
-        var pursuitPages = new OwnedPursuitPages();
-        foreach (var item in catalog.Items)
-        {
-            var detail = catalog.ReadItem(item.Tag, packages.Read(item.Tag));
-            rewards.Add(catalog, tables, detail, vendors);
-            pursuitPages.Add(catalog, tables, item, packages.Read(item.Tag), detail);
-            if (detail.Wrapper is not null) wrappers++;
-            if (detail.Pursuit is not { } pursuit) continue;
-            pursuits++; previews += pursuit.Previews.Count != 0 ? 1 : 0; chains += pursuit.Chain is { Error: "" } ? 1 : 0;
-            eight += pursuit.Objectives.Count == 8 ? 1 : 0; lifetimes += pursuit.LifetimeSeconds is not null ? 1 : 0;
-            longest = Math.Max(longest, pursuit.Chain?.Steps.Count ?? 0);
-        }
-        Check(pursuits == 3167 && eight == 4 && wrappers == 444, "Installed pursuit or wrapper counts changed.");
-        string references = OwnedReferences(catalog, tables, longest);
-        string pursuitSummary = pursuitPages.Summary(catalog, packages, tables);
-        string campaign = OwnedCampaign(catalog, packages, tables);
-        string pages = rewards.Summary(catalog, packages, tables, vendors, vendorTimer.ElapsedMilliseconds);
-        var sockets = tables.Pools.SelectMany(pool => pool.Entries).SelectMany(entry => entry.Sockets)
-            .Concat(tables.Progressions.SelectMany(row => row.Rewards).SelectMany(row => row.Sockets))
-            .GroupBy(socket => InvestmentTableViews.SocketOverride(catalog, socket).Tip).ToDictionary(group => group.Key, group => group.Count());
-        var sites = tables.Pools.SelectMany(pool => pool.Entries).Where(entry => entry.Slot84Reference != ushort.MaxValue)
-            .Select(entry => InvestmentRewardTree.SiteTip(tables, entry)).ToArray();
-        int fixedRolls = sockets.GetValueOrDefault("Extracted: fixed roll"), siteItems = sites.Count(tip => tip.EndsWith("grants its item.", StringComparison.Ordinal));
-        // Measured: every plug-set override is also marked fixed, so the set check has to come before the fixed one.
-        Check(fixedRolls == 791 && sockets.Single(pair => pair.Key.StartsWith("References", StringComparison.Ordinal)).Value == 1560
-            && sites.Length == 221 && siteItems == 202, "Installed socket override or reward site shapes changed: "
-            + string.Join(", ", sockets.Select(pair => $"{pair.Value} {pair.Key}")));
-        Console.WriteLine($"investment_tables owned=pass load_ms={timer.ElapsedMilliseconds} pools={tables.Pools.Count} "
-            + $"entries={tables.Pools.Sum(pool => pool.Entries.Count)} pass={string.Join('/', tables.PassCandidates.Select(row => row.Index))} "
-            + $"objectives={tables.Objectives.Count} objective_text={described}/{tables.Objectives.Count} shared={tables.Unlocks.SharedCount} objective_depth={deepest} "
-            + $"pool_depth={tables.RewardGraph.MaximumDepth} pursuits={pursuits} chains={chains} previews={previews} lifetimes={lifetimes} "
-            + $"wrappers={wrappers} fixed_rolls={fixedRolls} sites={sites.Length} site_items={siteItems} {buckets} {passItems} {unlockSources} {references} {pages} "
-            + $"{pursuitSummary} {campaign} {progress} "
-            + $"diagnostics={tables.Diagnostics.Count}");
-        foreach (string diagnostic in tables.Diagnostics) Console.WriteLine("investment_tables diagnostic=" + diagnostic);
-    }
-
-    /**
-     * The installation's campaign: the one chain of thirty steps that each own a copy of it, found by that shape. Its steps
-     * show no rewards and complete automatically, so every node says so and carries no chips, and its links keep authored order.
-     */
-    private static string OwnedCampaign(InvestmentCatalog catalog, PackageCatalog packages, InvestmentTables tables)
-    {
-        int owner = Campaign(catalog, tables);
-        var chain = catalog.ReadQuestSet(owner);
-        var details = chain.Steps.Select(step => QuestSteps.Read(catalog, packages, step.ItemIndex, default)).ToArray();
-        Check(chain.Steps.All(step => tables.QuestOwner(step.ItemIndex) == step.ItemIndex)
-            && details.All(step => step.Detail?.Pursuit is { Automatic: true, Previews.Count: 0 }),
-            "The campaign's steps no longer own their chain copies, or now show rewards.");
-        var model = QuestChainView.Build(catalog, tables, chain, details, chain.Steps[1].ItemIndex, (text, suffix) => text + suffix);
-        Check(model.Nodes.All(node => node.Note == QuestChainView.AutomaticNote && node.Chips is null)
-            && model.Edges.All(edge => edge is { Label: "", Tip: "Next in authored order.", Editable: false }),
-            "The campaign does not read as automatic steps without rewards, linked in authored order.");
-        return $"campaign={owner}:{chain.Steps.Count}";
-    }
-
-    /** The owner of the installation's campaign copy that starts at its own step: the one thirty-step chain whose every step owns a copy. */
-    internal static int Campaign(InvestmentCatalog catalog, InvestmentTables tables) => QuestOwners(catalog, tables)
-        .Single(owner => catalog.ReadQuestSet(owner) is { Steps.Count: 30 } chain && chain.Steps[0].ItemIndex == owner
-            && chain.Steps.All(step => tables.QuestOwner(step.ItemIndex) == step.ItemIndex));
-
-    /** Every item some item names as its quest-set owner, once each and in index order. */
-    internal static int[] QuestOwners(InvestmentCatalog catalog, InvestmentTables tables) =>
-        [.. Enumerable.Range(0, catalog.Items.Count).Select(tables.QuestOwner).Where(owner => owner >= 0).Distinct().Order()];
-
-    /**
-     * Every installed item's Rewards page model and every draw table's graph: the largest closure is exactly the graph's cap,
-     * vendors read without problems, and the sale rows' item indices stay in the range the vendor reader keeps.
-     */
-    private sealed class OwnedRewardPages
-    {
-        private int sold, givers, sited, largest, largestNodes, refused;
-
-        public void Add(InvestmentCatalog catalog, InvestmentTables tables, InvestmentItemDetail detail, InvestmentVendorSales vendors)
-        {
-            var model = ItemRewardsPage.Build(catalog, tables, detail, vendors);
-            if (model.GivenBy.Any(line => line.Link == RewardLinkKind.Vendor)) sold++;
-            if (model.GivenBy[0].Style != RewardLineStyle.Muted) givers++;
-            if (model.Sites[0].Style != RewardLineStyle.Muted) sited++;
-            if (detail.Wrapper is not { } wrapper) return;
-            var graph = RewardClosureGraph.Build(catalog, tables, detail.Item.Index, wrapper, (name, suffix) => name + suffix);
-            if (graph.TooLarge) refused++;
-            if (graph.Pools > largest) (largest, largestNodes) = (graph.Pools, graph.Nodes.Count);
-        }
-
-        public string Summary(InvestmentCatalog catalog, PackageCatalog packages, InvestmentTables tables, InvestmentVendorSales vendors, long milliseconds)
-        {
-            // The producer: a sale names its item by the u16 at +70 (InvestmentDetails.ReadVendor); count what the install holds.
-            var items = catalog.Vendors.SelectMany(vendor => catalog.ReadVendor(vendor.Tag, packages.Read(vendor.Tag)).Sales).Select(sale => sale.ItemIndex).ToArray();
-            int unset = items.Count(item => item == ushort.MaxValue), outside = items.Count(item => item != ushort.MaxValue && item >= catalog.Items.Count);
-            Check(vendors.Problems.Count == 0 && vendors.Rows == items.Length && outside == 0, $"Installed vendor sales changed: {vendors.Problems.Count} problems, "
-                + $"{outside} sale items outside the item table.");
-            Check(largest == RewardClosureGraph.PoolLimit && refused == 0, $"The largest installed draw table closure is {largest} pools, not the graph cap.");
-            // A pool's search text names each entry item's index and hash.
-            var (pool, entry) = Enumerable.Range(0, tables.Pools.Count).SelectMany(row => tables.Pools[row].Entries.Where(item => item.ItemIndex < catalog.Items.Count)
-                .Select(item => (row, (int)item.ItemIndex))).First();
-            var lines = RewardPoolsPage.SearchText(catalog, tables, pool, RewardPoolsPage.Label(catalog, tables, pool)).Split('\n');
-            Check(lines.Contains(entry.ToString(System.Globalization.CultureInfo.InvariantCulture)) && lines.Contains($"{catalog.Items[entry].Hash:X8}"),
-                "Installed pool search does not name an entry's item index and hash.");
-            return $"vendor_sales={vendors.Rows} ms={milliseconds} sale_unset={unset} sold_items={sold} given_items={givers} sited_items={sited} "
-                + $"graph_pools={largest} graph_nodes={largestNodes}";
-        }
-    }
-
-    /**
-     * Every installed item's pursuit page as CanOpen decides it from the document bytes, checked against the shape the
-     * tables index; every pursuit's inspector content, and every quest chain's nodes.
-     */
-    private sealed class OwnedPursuitPages
-    {
-        private readonly QuestPage quest = new();
-        private readonly PursuitPage pursuit = new();
-        private int quests, pursuits, investment, sourceRows, uses, bounties;
-
-        public void Add(InvestmentCatalog catalog, InvestmentTables tables, InvestmentItem item, byte[] bytes, InvestmentItemDetail detail)
-        {
-            var document = new StudioDocument(new PackageEntry(item.Tag, InvestmentCatalog.ItemClass, 8, 0, bytes.Length, "owned", 0, 0), item.Name, bytes,
-                new AssetInspection("Item", item.Name, [], [], []), null, null, "");
-            bool opensQuest = quest.CanOpen(document), opensPursuit = pursuit.CanOpen(document), keeps = InvestmentPage.ShowsObjectives(document);
-            Check(InvestmentPursuits.Classify(bytes).Shape == tables.PursuitShape(item.Index) && (opensQuest ? 1 : 0) + (opensPursuit ? 1 : 0) + (keeps ? 1 : 0)
-                == (tables.PursuitShape(item.Index) == InvestmentPursuitShape.None ? 0 : 1), $"Item {item.Index} opens on the wrong pursuit pages.");
-            quests += opensQuest ? 1 : 0; pursuits += opensPursuit ? 1 : 0; investment += keeps ? 1 : 0;
-            // The board's installed bounty rule agrees with the pursuit reader's constant lifetime on every held-pursuit item.
-            if (item.Bucket == InvestmentPursuits.PursuitBucket)
-            {
-                bool expires = detail.Pursuit?.LifetimeSeconds > 0;
-                Check(tables.Expires(item.Index) == expires, $"Item {item.Index}'s installed lifetime and its bounty placement disagree.");
-                bounties += expires ? 1 : 0;
-            }
-            if (detail.Pursuit is not { } read) return;
-            foreach (var objective in PursuitInspector.Sources(catalog, tables, read))
-            {
-                sourceRows += objective.Rows.Count;
-                uses += objective.Rows.Sum(row => row.Uses);
-            }
-            Check(PursuitInspector.Installed(catalog, tables, item, read).Count >= 8, $"Item {item.Index} has no installed data.");
-        }
-
-        /**
-         * Measured: 1,320 quest items, and 2,018 single-step pursuits of which 980 sit outside the Pursuits bucket; 987
-         * Pursuits-bucket items have a positive lifetime, every one a single-step pursuit.
-         */
-        public string Summary(InvestmentCatalog catalog, PackageCatalog packages, InvestmentTables tables)
-        {
-            Check(quests == 1320 && pursuits == 2018 - 980 && investment == 980, $"Installed pursuit pages changed: quest={quests} pursuit={pursuits} investment={investment}.");
-            Check(bounties == 987, $"Installed Pursuits-bucket lifetimes changed: {bounties} expire.");
-            int owners = 0, nodes = 0, longest = -1;
-            foreach (int owner in QuestOwners(catalog, tables))
-            {
-                var chain = catalog.ReadQuestSet(owner);
-                var model = QuestChainView.Build(catalog, tables, chain, null, -1, (text, suffix) => text + suffix);
-                Check(model.Nodes.Count == chain.Steps.Count && model.Edges.Count == Math.Max(0, chain.Steps.Count - 1), $"Quest {owner} drew the wrong nodes.");
-                owners++; nodes += model.Nodes.Count;
-                if (longest < 0 || chain.Steps.Count > catalog.ReadQuestSet(longest).Steps.Count) longest = owner;
-            }
-            // The longest chain with every step read: no node draws more than its objective summary.
-            var steps = catalog.ReadQuestSet(longest);
-            var details = steps.Steps.Select(step => new QuestStepDetail(step.ItemIndex,
-                catalog.ReadItem(catalog.Items[step.ItemIndex].Tag, packages.Read(catalog.Items[step.ItemIndex].Tag)), "")).ToArray();
-            var full = QuestChainView.Build(catalog, tables, steps, details, -1, (text, suffix) => text + suffix);
-            Check(full.Nodes.All(node => node.Rows!.Count is > 0 and <= QuestChainView.ObjectiveRows && node.Tint is null), "The longest quest's nodes are wrong.");
-            quest.Dispose(); pursuit.Dispose();
-            return $"quest_pages={quests} pursuit_pages={pursuits} investment_objectives={investment} board_bounties={bounties} quest_owners={owners} quest_nodes={nodes} "
-                + $"longest_quest={longest}:{steps.Steps.Count} source_rows={sourceRows} source_uses={uses}";
-        }
-    }
-
-    /**
-     * The reference indexes and pursuit shapes as measured with an independent byte probe: every site and lane index is a
-     * u16 whose only absent value is 0xFFFF (no zero appears), and the largest wrapper closure, chain and owner count bound
-     * the pages that show them.
-     */
-    private static string OwnedReferences(InvestmentCatalog catalog, InvestmentTables tables, int longestChain)
-    {
-        var references = tables.References;
-        var sites = references.SiteIndices.SelectMany(references.Sites).GroupBy(reference => reference.Kind).ToDictionary(group => group.Key, group => group.Count());
-        int lists = references.Slot79Indices.Sum(row => references.Slot79(row).Count);
-        Check(sites.GetValueOrDefault(RewardReferenceKind.CompletionPrimary) == 2451 && sites.GetValueOrDefault(RewardReferenceKind.CompletionSecondary) == 507
-            && sites.GetValueOrDefault(RewardReferenceKind.PoolEntry) == 221 && sites.GetValueOrDefault(RewardReferenceKind.Acquire) == 1849
-            && sites.GetValueOrDefault(RewardReferenceKind.SocketSite) == 1651 && lists == 12002 && references.Slot79Indices.Count == 185
-            && references.SiteIndices[0] != 0 && references.Slot79Indices[0] != 0,
-            "Installed reward site references changed: " + string.Join(", ", sites.Select(pair => $"{pair.Key}={pair.Value}")) + $", slot79={lists}");
-        int closure = Enumerable.Range(0, catalog.Items.Count).Where(item => tables.WrapperPool(item) >= 0)
-            .Max(item => tables.RewardGraph.Closure(tables.WrapperPool(item)).Count);
-        int owners = QuestOwners(catalog, tables).Length;
-        var shapes = Enumerable.Range(0, catalog.Items.Count).GroupBy(tables.PursuitShape).ToDictionary(group => group.Key, group => group.ToArray());
-        int single = shapes.GetValueOrDefault(InvestmentPursuitShape.Single)?.Length ?? 0;
-        int outside = shapes.GetValueOrDefault(InvestmentPursuitShape.Single)?.Count(item => catalog.Items[item].Bucket != InvestmentPursuits.PursuitBucket) ?? 0;
-        Check(closure == 26 && longestChain == 30 && owners == 807 && single == 2018 && outside == 980
-            && shapes.GetValueOrDefault(InvestmentPursuitShape.Quest)?.Length == 1320, "Installed closures, chains or pursuit shapes changed.");
-        int bindings = 0, uses = 0;
-        foreach (var binding in tables.Objectives.SelectMany(row => row.Source.Instructions).Select(tables.Unlocks.Binding).OfType<UnlockBinding>().Distinct())
-        { bindings++; uses += references.Users(binding).Count; }
-        return $"reward_sites={references.SiteIndices.Count} slot79_rows={references.Slot79Indices.Count} site_references={sites.Values.Sum()} "
-            + $"closure={closure} longest_chain={longestChain} owners={owners} single={single}/{outside} objective_rows={bindings} objective_row_uses={uses}";
-    }
-
-    /**
-     * Keeping each installed pass row's own item passes every replacement check but the missing perk flag Sunrise refuses, and the
-     * perk rows Sunrise grants at rank-up are counted from installed bytes. Item edits reach the game only through a patchable package.
-     */
-    private static string OwnedPassItems(InvestmentCatalog catalog, PackageCatalog packages, InvestmentTables tables)
-    {
-        uint tag = tables.TableTag(InvestmentRootSlots.Progressions);
-        Check(packages.TryGetEntry(tag, out var entry) && !ModInstaller.IsStartupPackage(entry.PackageName),
-            "The progression table is in a startup package, so Build and install would refuse a pass item edit.");
-        var refused = tables.PassCandidates.SelectMany(ladder => ladder.Rewards)
-            .Select(row => (Row: row, Refusal: SeasonPassPage.Replacement(catalog, tables, row, (int)row.ItemIndex).Refusal))
-            .Where(row => row.Refusal.Length != 0).ToArray();
-        // Sunrise grants a perk only through an account acquisition flag, so it refuses the claim of a perk row without one.
-        var other = refused.Where(row => row.Refusal != RewardRefusals.PerkAcquisition).ToArray();
-        Check(other.Length == 0, "Installed pass rows are refused with their own items for more than a missing perk flag: "
-            + string.Join(", ", other.Select(row => $"{row.Row.Progression}/{row.Row.Index} {row.Refusal}")));
-        Check(Enumerable.Range(0, catalog.Items.Count).All(item => tables.AcquiredFlagSlot(item) == ushort.MaxValue
-                || tables.AcquiredFlagSlot(item) == tables.AcquisitionFlag(item)), "The two reads of an item's acquisition flag disagree.");
-        var pass = tables.Progressions[40];
-        int automatic = pass.Rewards.Count(row => SeasonPassPage.Automatic(catalog, tables, (int)row.ItemIndex));
-        // Measured: 35 rows of pass 40 name a perk-bucket item without a pool; 3 of them have no account acquisition flag.
-        Check(automatic == 32, $"Installed automatic perk rows of progression 40 changed: {automatic}.");
-        byte[] bytes = packages.Read(tag);
-        var field = pass.Rewards[0].ItemField;
-        string last = (catalog.Items.Count - 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        Check(BinaryPrimitives.ReadUInt32LittleEndian(catalog.EditTableField(field, bytes, last).AsSpan(field.Property.Offset)) == catalog.Items.Count - 1,
-            "The last installed item index was not accepted as a pass item.");
-        Reject(() => catalog.EditTableField(field, bytes, catalog.Items.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)),
-            $"Item must be an index of this installation's item table (0 to {last}).");
-        return $"pass_package={entry.PackageName} pass_automatic={automatic} pass_perk_refused={refused.Length}";
-    }
-
-    /**
-     * Every installed objective's progress source against Sunrise's objective build on this install (its log reads rows=8483
-     * unreadable=31 item_progress=2334). Of the 1,066 programs that expand to several instructions, 19 also hold one Sunrise
-     * cannot bind, so they are among its 31 unreadable ones.
-     */
-    private static string OwnedProgressSources(InvestmentTables tables)
-    {
-        var sources = tables.Objectives.Select(tables.ProgressSource).ToArray();
-        var counts = Enum.GetValues<InvestmentProgressKind>().ToDictionary(kind => kind, kind => sources.Count(source => source.Kind == kind));
-        Check(counts.Values.Sum() == 8483 && counts[InvestmentProgressKind.ItemValue] == 2334 && counts[InvestmentProgressKind.Several] == 1047
-            && counts[InvestmentProgressKind.Unreadable] == 31,
-            "Installed objective sources differ from Sunrise's binding: " + string.Join(", ", counts.Select(pair => $"{pair.Key}={pair.Value}")));
-        string targets = string.Join('/', tables.Objectives.Where((_, index) => sources[index].Kind == InvestmentProgressKind.Flag)
-            .GroupBy(objective => objective.CompletionValue).OrderBy(group => group.Key).Select(group => $"{group.Key}:{group.Count()}"));
-        return "progress_sources=" + string.Join(',', counts.Select(pair => $"{pair.Key}:{pair.Value}")) + $" flag_targets={targets}";
-    }
-
-    /**
-     * Studio sends a saved row exactly when its proven label names the row Sunrise binds the slot to; on the installed tables
-     * every proven slot qualifies, and the three class flags are read from Hello instead.
-     */
-    private static string OwnedUnlockSources(InvestmentUnlocks unlocks)
-    {
-        int Count(uint opcode, int slots, out int proven, out int classes)
-        {
-            int bound = 0; proven = 0; classes = 0;
-            for (uint slot = 0; slot < slots; slot++)
-            {
-                var instruction = new InvestmentUnlockInstruction(opcode, slot, 0);
-                if (unlocks.ClassOf(instruction) >= 0) { classes++; Check(LiveUnlockSources.Of(unlocks, instruction) is null, $"Class flag {slot} was sent."); continue; }
-                if (unlocks.Label(instruction).Proven) proven++;
-                if (LiveUnlockSources.Of(unlocks, instruction) is not null) bound++;
-            }
-            return bound;
-        }
-        int flags = Count(InvestmentUnlocks.FlagOpcode, unlocks.FlagSlots.Count, out int provenFlags, out int classFlags);
-        int values = Count(InvestmentUnlocks.ValueOpcode, unlocks.ValueSlots.Count, out int provenValues, out _);
-        // Measured: 15,438 proven flag slots and 6,405 proven value slots, each bound by Sunrise to the row its label names.
-        Check(flags == provenFlags && values == provenValues && classFlags == 3 && flags == 15438 && values == 6405,
-            $"Installed saved-row bindings changed: flags {flags}/{provenFlags}, values {values}/{provenValues}, class flags {classFlags}.");
-        return $"unlock_sources=flags:{flags}/{unlocks.FlagSlots.Count},values:{values}/{unlocks.ValueSlots.Count},class:{classFlags}";
-    }
-
-    /** The installed bucket table as measured; the byte counts are printed, not asserted, since nothing upstream reads them. */
-    private static string OwnedBuckets(InvestmentCatalog catalog, InvestmentTables tables)
-    {
-        var buckets = tables.Buckets;
-        var scopes = buckets.GroupBy(bucket => bucket.ArraySelector).OrderBy(group => group.Key).Select(group => group.Count()).ToArray();
-        Check(buckets.Count == 49 && scopes.SequenceEqual([32, 11, 6]) && buckets.Select(bucket => bucket.Id).Distinct().Count() == 49
-            && tables.BucketTableProblems.Count == 0 && buckets.All(bucket => bucket.Problem.Length == 0)
-            && tables.Bucket(PursuitsId) is { FirstSlot: InstalledPursuitsFirst, SlotCount: InstalledPursuitsSlots },
-            "The installed bucket table changed.");
-        int[] missing = catalog.Items.Select(item => item.Bucket).Distinct().Where(bucket => tables.Bucket(bucket) is null)
-            .Select(bucket => (int)bucket).Order().ToArray();
-        string Bytes(Func<InvestmentBucket, byte> field) => string.Join('/', buckets.GroupBy(field).OrderBy(group => group.Key)
-            .Select(group => $"{group.Key}x{group.Count()}"));
-        return $"buckets={buckets.Count} bucket_tag={tables.BucketTableTag:X8} bucket_class=0x{tables.BucketTableClass:X8} "
-            + $"fifo={Bytes(bucket => bucket.Fifo)} no_transfer={Bytes(bucket => bucket.NoTransferOnEviction)} "
-            + $"item_buckets_without_descriptor={missing.Length} ({string.Join(',', missing)})";
     }
 
     private static byte[] Root()

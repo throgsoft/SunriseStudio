@@ -25,9 +25,8 @@ internal sealed partial class PursuitInspector
     private const string Unknown = "Unknown", UnreadTip = "The game could not read this row.";
     private const string ClassTip = "Set when the selected character is this class; not saved data.";
     private (InvestmentTables? Tables, InvestmentPursuit? Pursuit) sourcesKey;
-    private IReadOnlyList<ObjectiveSources> sources = [];
     /** The sources of the pursuit last drawn. */
-    internal IReadOnlyList<ObjectiveSources> ListedSources => sources;
+    private IReadOnlyList<ObjectiveSources> sources = [];
 
     /** What a source row's uses button does: lists every use of its saved row under it, or hides them. */
     internal void ToggleUses(InvestmentCatalog catalog, InvestmentTables tables, int ordinal, int index)

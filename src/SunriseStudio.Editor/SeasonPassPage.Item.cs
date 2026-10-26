@@ -16,7 +16,6 @@ public sealed partial class SeasonPassPage
     internal const string StopsAutomatic = "This row stops being an automatic perk row and needs a claim.";
     private const string OneProgression = "The game serves one progression; edits to the others have no effect in game.";
     private readonly ItemCatalogView itemPicker = new();
-    internal ItemCatalogView ItemPicker => itemPicker;
 
     /** Why Sunrise would refuse the row after the replacement (empty when it would not), and the notes to read before saving. */
     internal sealed record ItemReplacement(string Refusal, IReadOnlyList<(string Text, bool MayNotWork)> Lines);

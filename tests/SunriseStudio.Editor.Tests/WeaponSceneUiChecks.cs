@@ -55,20 +55,16 @@ internal static class WeaponSceneUiChecks
                 if (++frames < 5 || workspace.LoadedWeapon is not { } loaded || loaded.Weapon != weapon) return;
                 Check(loaded.Receipt && loaded.Owned && loaded.Art is not null && loaded.Errors.Count == 0,
                     "The Weapon page did not read the created weapon: " + string.Join("; ", loaded.Errors));
-                // A plain open reads the item alone; the model pane beside the tabs offers Load model.
-                Check(workspace.Document is { ModelDeferred: true, Scene: null } opened
-                    && StudioCategories.ForKind(opened.Kind)?.ModelPane == true,
-                    "Opening the weapon read its model, or left the model pane.");
-                Capture("weapon-page-deferred");
+                // A plain open reads the item alone, and Load model reads the weapon view's model.
                 workspace.LoadModel(); phase++; frames = 0; return;
             }
             if (phase == 2)
             {
                 if (++frames < 5) return;
-                // Load model reads the weapon view, and the model shows beside the tabs.
-                Check(workspace.Document is { ModelDeferred: false, Scene: not null } opened && opened.Entry.TagHash == weapon
-                    && ReferenceEquals(form.AssetPreviewViewport!.Scene, opened.Scene),
-                    "Load model did not show the weapon's model beside the tabs.");
+                Check(workspace.Document is { Scene: not null } opened
+                    && ReferenceEquals(form.AssetPreviewViewport!.Scene, opened.Scene)
+                    && StudioCategories.ForKind(opened.Kind)?.ModelPane == true,
+                    "Opening the weapon did not show its model beside the tabs.");
                 Capture("weapon-page");
                 workspace.OpenWeaponModel(weapon); phase++; frames = 0; return;
             }

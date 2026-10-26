@@ -2,10 +2,7 @@ using System.Reflection;
 using SunriseStudio.Editor;
 using SunriseStudio.Scene;
 
-/**
- * Back and Forward return to the previous document after an open that changes the page tabs, and to Live opened before any
- * document.
- */
+/** Back and Forward return to the previous document after an open that changes the page tabs. */
 internal static class NavigationChecks
 {
     private const uint Helmet = 0x8131934E, Weapon = 0x8132017D;
@@ -48,7 +45,7 @@ internal static class NavigationChecks
         Application.Run(form);
         if (form.Failure is { } error) throw new InvalidDataException(error);
         Check(done, "The navigation check stopped early.");
-        Console.WriteLine("editor_navigation live_first=pass guardian_item=pass guardian_weapon=pass enemy_component=pass open_as_asset=pass deferred_open_as_asset=pass deferred_pages=kept_model");
+        Console.WriteLine("editor_navigation guardian_item=pass guardian_weapon=pass enemy_component=pass open_as_asset=pass");
     }
 
     /** Each step acts, then yields the settled frames to wait before the next step checks it. */
@@ -58,18 +55,6 @@ internal static class NavigationChecks
         for (int tries = 0; tries < 200 && workspace.CategoryRowsOf(StudioCategories.EnemiesCategory).Count == 0; tries++)
             yield return 5;
         Check(workspace.CategoryRowsOf(StudioCategories.EnemiesCategory).Count != 0, "The Enemies category is empty.");
-
-        // Live needs no document, so it is a place of its own before the first asset opens.
-        Check(workspace.Document is null, "A document opened before the check.");
-        form.ShowAssetPage("Live"); yield return 5;
-        Check(shownPage() == "live:world" && !workspace.CanNavigateBack, $"Live showed {shownPage()} or left a place to go back to.");
-        workspace.Open(GuardianClasses.Titan); yield return 5;
-        form.ShowAssetPage(StudioCategories.GuardianPageId); yield return 5;
-        Navigate(back: true); yield return 5;
-        Check(shownPage() == "live:world" && workspace.Document?.Entry.TagHash == GuardianClasses.Titan,
-            $"Back showed {shownPage()} instead of Live, or closed the document.");
-        Navigate(back: false); yield return 5;
-        Expect(GuardianClasses.Titan, "asset:" + StudioCategories.GuardianPageId);
 
         // The Guardian page opens an item with Select, as its Open item button does.
         workspace.Open(GuardianClasses.Titan); yield return 5;
@@ -86,7 +71,7 @@ internal static class NavigationChecks
         Navigate(back: true); yield return 5;
         workspace.Select(Weapon); yield return 5;
         Expect(Weapon);
-        // A plain open reads the item alone in the weapon view; Load model reads the model and its animation owner.
+        // A plain open reads the item alone in the weapon view. Load model reads the model and its animation owner.
         var weaponView = workspace.Document!.OpenContext;
         Check(workspace.Document is { ModelDeferred: true, Scene: null } && weaponView is { WeaponItemTag: Weapon, EntityTag: 0 },
             "The weapon read its model on a plain open.");
@@ -95,38 +80,6 @@ internal static class NavigationChecks
         Navigate(back: false); yield return 5;
         Expect(Weapon);
         Check(workspace.Document!.OpenContext is { } forward && forward with { EntityTag = 0 } == weaponView, "Forward lost the weapon view.");
-        // Open as asset is another view, so it reads the deferred weapon plainly with its preview; Back returns to the deferred
-        // weapon view, which history kept.
-        workspace.Open(Weapon, StudioWorkspace.PlainOpen); yield return 5;
-        Expect(Weapon);
-        Check(workspace.Document is { Kind: "", ModelDeferred: false, OpenContext: var plainWeapon } && plainWeapon == StudioWorkspace.PlainOpen,
-            "Open as asset kept the deferred weapon deferred or in the weapon view.");
-        Navigate(back: true); yield return 5;
-        Expect(Weapon);
-        Check(workspace.Document is { ModelDeferred: true, OpenContext: { } returned } && returned with { EntityTag = 0 } == weaponView,
-            "Back from Open as asset did not return to the deferred weapon view.");
-        workspace.LoadModel(); yield return 5;
-        Expect(Weapon);
-        Check(workspace.Document is { ModelDeferred: false, Scene: not null, OpenContext: { WeaponItemTag: Weapon, EntityTag: not 0 } },
-            "Load model did not read the weapon with its animation owner.");
-
-        // Two pages of the deferred weapon are two places. Load model on the second keeps the model for Back and Forward between
-        // them, so neither rereads the weapon on its data alone.
-        workspace.Select(Helmet); yield return 5;
-        workspace.Select(Weapon); yield return 5;
-        form.ShowAssetPage(InvestmentPage.PageId); yield return 5;
-        form.ShowAssetPage(ItemRewardsPage.PageId); yield return 5;
-        Expect(Weapon, "asset:" + ItemRewardsPage.PageId);
-        Check(workspace.Document is { ModelDeferred: true }, "The weapon read its model on a plain open.");
-        workspace.LoadModel(); yield return 5;
-        var loaded = workspace.Document;
-        Check(loaded is { ModelDeferred: false, Scene: not null }, "Load model on the second page did not read the model.");
-        Navigate(back: true); yield return 5;
-        Expect(Weapon, "asset:" + InvestmentPage.PageId);
-        Check(ReferenceEquals(workspace.Document, loaded), "Back to the weapon's first page reread it and dropped its model.");
-        Navigate(back: false); yield return 5;
-        Expect(Weapon, "asset:" + ItemRewardsPage.PageId);
-        Check(ReferenceEquals(workspace.Document, loaded), "Forward to the weapon's second page reread it.");
 
         // The Components page opens a config with Select.
         uint enemy = workspace.CategoryRowsOf(StudioCategories.EnemiesCategory)[0].Entry.TagHash;

@@ -30,7 +30,6 @@ public sealed class RewardSitesPage : IStudioPage, IStudioRowPage, IFramePrepare
     private (RewardIndexTable Table, ushort Index)? requested;
     private readonly InvestmentTablesLoader loader = new();
     private readonly InvestmentIconCache icons = new();
-    internal InvestmentIconCache Icons => icons;
     private int table, kind;
     private int selected = -1;
     private bool scrollToSelected;

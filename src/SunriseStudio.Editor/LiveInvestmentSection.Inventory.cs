@@ -16,7 +16,6 @@ internal sealed partial class LiveInvestmentSection
     // Lines reserved under the held cells for the chosen row: its line, its buttons and its last action.
     private const int SelectedLines = 3;
     private readonly BucketList buckets = new();
-    internal BucketList Buckets => buckets;
     private readonly IconGrid heldGrid = new();
     private string inventorySearch = "";
     // The bucket and search the held rows last showed. A change scrolls them back to the top.

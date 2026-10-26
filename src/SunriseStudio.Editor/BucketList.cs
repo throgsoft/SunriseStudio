@@ -30,9 +30,8 @@ internal sealed class BucketList
     private const string Many = "-";
     private BucketIndex? index;
     private (BucketIndex? Index, string Search) shownKey;
-    private InvestmentBucket[] shown = [];
     /** The buckets the list shows under All held items, in its order. */
-    internal IReadOnlyList<InvestmentBucket> Shown => shown;
+    private InvestmentBucket[] shown = [];
     private bool scrollToSelected;
     private string search = "";
 

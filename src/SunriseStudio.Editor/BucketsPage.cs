@@ -26,7 +26,6 @@ public sealed class BucketsPage : IStudioPage, IStudioRowPage, IFramePreparedPag
     private byte? requested;
     private readonly InvestmentTablesLoader loader = new();
     private readonly InvestmentIconCache icons = new();
-    internal InvestmentIconCache Icons => icons;
     private readonly IconGrid installedGrid = new();
     private readonly BucketList list = new();
     private string itemSearch = "";

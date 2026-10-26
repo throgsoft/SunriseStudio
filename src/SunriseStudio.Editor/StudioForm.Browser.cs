@@ -27,7 +27,6 @@ public sealed partial class StudioForm
     private bool focusAssetBrowser;
     /** Item icons of the visible rows of every browser list. */
     private readonly InvestmentIconCache browserIcons = new();
-    internal InvestmentIconCache BrowserIcons => browserIcons;
     private const string GridRefusal = "Only item lists have icons.";
     /** The grid form of the category, Results and All other assets lists. */
     private readonly IconGrid assetGrid = new();
@@ -43,10 +42,8 @@ public sealed partial class StudioForm
     private readonly InvestmentTablesLoader itemCatalog = new();
     /** The item catalog every item category lists through, with that category as its kind. */
     private readonly ItemCatalogView itemBrowser = new(kindMenu: false);
-    private bool itemsOpen;
-    internal ItemCatalogView ItemBrowser => itemBrowser;
     /** True while the browser lists an item category, or every item, through the item catalog. */
-    internal bool ItemsOpen => itemsOpen;
+    private bool itemsOpen;
 
     /** The category whose list is shown; null on the home view and in All other assets. */
     private StudioCategory? OpenCategory => category == AllCategories ? null : StudioCategories.Find(category);

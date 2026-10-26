@@ -8,12 +8,17 @@ using SunriseStudio.Viewport;
 internal static class LiveInvestmentSessionChecks
 {
     private const ulong Account = 0x4000000000000002, Warlock = 0x4000000000000003, Hunter = 0x4000000000000004;
-    private const ulong Content = 0x1F2E3D4C5B6A7988, Started = ScriptedGame.Started;
+    private const ulong Content = 0x1F2E3D4C5B6A7988;
+    // The game process instance every scripted hello names, so receipts stay readable across hellos.
+    private const ulong Started = 0x01DB1234ABCD5678;
     private const uint ItemHash = 0x80A10001;
     private static readonly LiveInvestmentContext Bound = new(Account, Warlock, Content);
-    private static readonly ulong Everything = ScriptedGame.Capabilities();
-    private static readonly LiveInvestmentReadiness Ready = ScriptedGame.Ready;
-    private const LiveInvestmentPublication Owned = ScriptedGame.Owned;
+    private static readonly ulong Everything = Capabilities();
+    // Every catalog the game reads.
+    private static readonly LiveInvestmentReadiness Ready =
+        Enum.GetValues<LiveInvestmentReadiness>().Aggregate(LiveInvestmentReadiness.None, (all, flag) => all | flag);
+    // A signed-in client owns the account, so changes can show.
+    private const LiveInvestmentPublication Owned = LiveInvestmentPublication.PeerPresent | LiveInvestmentPublication.PeerOwnsAccount;
 
     public static void Run()
     {
@@ -181,7 +186,7 @@ internal static class LiveInvestmentSessionChecks
         session.Attach(new LiveProcess(41, ""));
         long now = 10_000;
         Until(session, now, () => session.State == LiveInvestmentState.Connecting, "No game was connected.");
-        ulong withoutEdits = ScriptedGame.Capabilities(LiveInvestmentOpcode.SetPursuitObjective, LiveInvestmentOpcode.CompletePursuitObjectives);
+        ulong withoutEdits = Capabilities(LiveInvestmentOpcode.SetPursuitObjective, LiveInvestmentOpcode.CompletePursuitObjectives);
         Answer(session, fake, now, Hello(Bound, 2, withoutEdits, Ready, Owned), "hello");
         string key = LiveAction.InstanceKey(instance);
         const LiveInvestmentReadiness needs = LiveInvestmentReadiness.Items | LiveInvestmentReadiness.Objectives | LiveInvestmentReadiness.Pursuits;
@@ -632,7 +637,7 @@ internal static class LiveInvestmentSessionChecks
         Check(stacks.Length == 2 && !stacks[0].SameRow(stacks[1]) && stacks[1].SameRow(stacks[1] with { Quantity = 3, MutationSerial = 99 }),
             "Two stacks of one item in different buckets read as one row.");
         // Nothing draws the inventory from here on, so a finished change does not read it again.
-        ScriptedGame.ForgetAsks(session);
+        session.Inventory.WantedUntil = 0;
         var keys = new HashSet<string>();
         foreach (var chosen in stacks)
         {
@@ -723,9 +728,16 @@ internal static class LiveInvestmentSessionChecks
             throw new InvalidDataException(message ?? $"The session sent {fake.Pending ?? "a request"}.");
     }
 
+    /** Every command the protocol defines, but those named. */
+    private static ulong Capabilities(params LiveInvestmentOpcode[] without) => Enum.GetValues<LiveInvestmentOpcode>()
+        .Where(opcode => opcode != LiveInvestmentOpcode.None && !without.Contains(opcode))
+        .Aggregate(0UL, (bits, opcode) => bits | LiveInvestmentProtocol.Capability(opcode));
+
+    /** A game's hello for the context's character, selected and of this class; a null class selects no character. */
     private static LiveInvestmentHello Hello(LiveInvestmentContext context, byte? characterClass, ulong capabilities,
         LiveInvestmentReadiness readiness, LiveInvestmentPublication publication, ulong started = Started) =>
-        ScriptedGame.Hello(context, characterClass, capabilities, readiness, publication, started);
+        new(context, readiness, capabilities, started,
+            characterClass is { } shown ? [new LiveInvestmentCharacter(context.CharacterSoid, shown, true)] : [], publication, 1);
 
     private static LiveInventorySnapshot Inventory(LiveInvestmentContext context, int quantity) =>
         new(context, 1, [new LiveBucket(0, 0, 0, 10, 0)], [],

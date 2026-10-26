@@ -16,7 +16,6 @@ internal sealed class LiveTab : IDisposable
     private const string AttachTip = "Attach every Live section to this game. " + LiveGate.AttachHelp;
     private readonly LiveInvestmentSession investment;
     private readonly IReadOnlyList<ILiveSection> sections;
-    internal IReadOnlyList<ILiveSection> Sections => sections;
     private IReadOnlyList<LiveProcess> processes = [];
     private int selected;
     private string? root;
@@ -33,16 +32,10 @@ internal sealed class LiveTab : IDisposable
     // The section the last Draw showed.
     private ILiveSection? drawn;
 
-    /** Lists one installation's running games. Smoke runs and checks replace it, so they never bind to the user's game. */
-    internal Func<string, IReadOnlyList<LiveProcess>> FindGames = LiveConnection.FindProcesses;
-    /** Opens the chosen game and returns a probe that reports its exit. Checks replace it to script an exit. */
-    internal Func<LiveProcess, Func<bool>> WatchExit;
-
     public LiveTab(LiveInvestmentSession investment, IReadOnlyList<ILiveSection> sections)
     {
         this.investment = investment;
         this.sections = sections;
-        WatchExit = OpenExitProbe;
     }
 
     /** True from Attach until Detach or the game's exit. Meanwhile Studio shares the GPU with the game. */
@@ -52,7 +45,7 @@ internal sealed class LiveTab : IDisposable
     public void Attach(LiveProcess process)
     {
         Detach(gameClosed: false);
-        try { exited = WatchExit(process); }
+        try { exited = OpenExitProbe(process); }
         catch (Exception error) when (error is ArgumentException or InvalidOperationException or Win32Exception)
         {
             failure = error is ArgumentException ? "The game is not running. Refresh the list." : error.Message;
@@ -194,11 +187,14 @@ internal sealed class LiveTab : IDisposable
     private void Refresh(string gameRoot)
     {
         listed = true;
-        processes = FindGames(gameRoot);
+        processes = LiveConnection.FindProcesses(gameRoot);
         selected = 0;
     }
 
-    /** The production exit probe. Like LiveConnection.Attach, it refuses an id whose process is not the listed executable. */
+    /**
+     * Opens the chosen game and returns a probe that reports its exit. Like LiveConnection.Attach, it refuses an id whose
+     * process is not the listed executable.
+     */
     private Func<bool> OpenExitProbe(LiveProcess target)
     {
         var process = Process.GetProcessById(target.Id);

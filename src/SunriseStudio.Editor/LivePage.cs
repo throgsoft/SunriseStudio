@@ -58,8 +58,6 @@ public sealed partial class LivePage : IDisposable, ILiveSection
     public long RuntimeRevision => dynamic.Revision;
     /** True while the world view is connected to the game. */
     public bool IsAttached => connection is not null;
-    /** Connects the world view. Checks replace it, so no check maps a real game's world. */
-    internal Func<LiveProcess, LiveConnection> AttachWorld = LiveConnection.Attach;
 
     string ILiveSection.Id => "world";
     string ILiveSection.Title => "World";
@@ -255,7 +253,7 @@ public sealed partial class LivePage : IDisposable, ILiveSection
     /** Connects the world view the first time World is drawn after Attach. After a failure, World waits for Retry. */
     private void ConnectWorld(LiveProcess process)
     {
-        try { connection = AttachWorld(process); status = "Connecting the world view"; }
+        try { connection = LiveConnection.Attach(process); status = "Connecting the world view"; }
         catch (Exception error) when (error is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
         { worldFailed = true; status = error.Message; }
     }

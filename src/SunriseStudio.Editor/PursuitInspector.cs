@@ -180,8 +180,6 @@ internal sealed partial class PursuitInspector : IDisposable
         if (!shownSources.Remove(ordinal)) shownSources.Add(ordinal);
     }
 
-    internal bool SourcesShown(int ordinal) => shownSources.Contains(ordinal);
-
     /** Which progress controls Live draws for a held copy: Complete objectives, and Set progress by objective ordinal. */
     internal sealed record ProgressOffers(bool Complete, IReadOnlyList<bool> Set);
 
@@ -189,9 +187,6 @@ internal sealed partial class PursuitInspector : IDisposable
     internal static ProgressOffers Offers(InvestmentTables tables, InvestmentPursuit pursuit, LiveHeldPursuit? held) =>
         new(PursuitProgress.CanComplete(tables, pursuit, held),
             [.. Enumerable.Range(0, pursuit.Objectives.Count).Select(ordinal => PursuitProgress.CanSet(tables, pursuit, ordinal, held))]);
-
-    /** The held copy Live shows for this item: the one chosen in the In game combo, else the first the game reports. */
-    internal LiveHeldPursuit? ShownCopy(LiveInvestmentSession live, InvestmentItem item) => Shown(live, HeldCopies(live, item));
 
     /** Every held copy of this item the game reports, or none while no pursuit snapshot is available. */
     private static IReadOnlyList<LiveHeldPursuit> HeldCopies(LiveInvestmentSession live, InvestmentItem item) =>

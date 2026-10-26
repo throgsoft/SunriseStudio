@@ -32,15 +32,6 @@ internal sealed partial class LiveInvestmentSection
     private readonly PursuitInspector inspector = new();
     private readonly ItemDetailRead pursuitDetail = new();
     private readonly QuestChainView pursuitChain = new();
-    internal PursuitInspector Inspector => inspector;
-    internal ItemDetailRead PursuitDetail => pursuitDetail;
-    internal QuestChainView PursuitChain => pursuitChain;
-    /** The board's cards as last built: held quests and bounties. */
-    internal (HeldPursuitCard[] Quests, HeldPursuitCard[] Bounties) Cards => pursuitCards;
-    internal PursuitBoardTab PursuitTab => pursuitTab;
-    internal uint? ChosenPursuit => chosenPursuit;
-    /** True while an asked-for pursuit waits for the snapshot to name its first held copy. */
-    internal bool PendingFirstCopy => pendingFirstCopy;
     private string pursuitSearch = "";
     // The inputs the board's cards were built from. The cards are rebuilt only when one of them changes.
     private (LiveInventorySnapshot? Inventory, LivePursuitSnapshot? Pursuits, InvestmentCatalog? Catalog, InvestmentTables? Tables,

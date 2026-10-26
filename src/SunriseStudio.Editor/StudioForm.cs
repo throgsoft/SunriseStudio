@@ -13,14 +13,12 @@ public sealed partial class StudioForm : Form
 {
     private readonly StudioOptions options;
     private readonly StudioSettings settings;
-    internal StudioSettings Settings => settings;
     private readonly string settingsPath;
     private readonly StudioWorkspace workspace = new();
     private readonly StudioPageRegistry pages = new();
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 1 };
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private Dx11Renderer? renderer;
-    internal Dx11Renderer? Renderer => renderer;
     private ImGuiController? gui;
     private GpuTexture? loadingLogo, toolbarLogo;
     private readonly Icon studioIcon;
@@ -40,8 +38,6 @@ public sealed partial class StudioForm : Form
     private readonly MissionGraphPage missionGraph = new();
     private readonly LivePage livePage = new();
     private readonly LiveTab liveTab;
-    internal LiveTab LiveTab => liveTab;
-    internal LivePage LivePage => livePage;
     private bool missionGraphActive, focusMissionGraph, focusAssets, focusLive, initialMissionScript;
     // True when the workbench last drew Live rather than Assets, so a browser choice brings Assets forward.
     private bool liveInFront;
@@ -50,7 +46,6 @@ public sealed partial class StudioForm : Form
     private int sceneRevision = -1;
     private bool browserPreparing;
     private float scale = 1;
-    internal float UiScale => scale;
     // The monitor DPI from the last DPI change, applied at the next frame; 0 when none is waiting.
     private int pendingDpi;
     private static readonly string BodyFontPath =
@@ -116,8 +111,6 @@ public sealed partial class StudioForm : Form
         SetStyle(ControlStyles.Opaque | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint, true);
         if (options.Smoke) ShowInTaskbar = false;
         liveTab = new LiveTab(workspace.LiveInvestment, [livePage, new LiveInvestmentSection(workspace)]);
-        // A smoke run never lists a game the user is playing; checks attach their own scripted game.
-        if (options.Smoke) liveTab.FindGames = _ => [];
         timer.Tick += (_, _) => TickFrame();
         workspace.BeforeAssetMutation += () =>
         {

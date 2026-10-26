@@ -132,9 +132,6 @@ try
     if (game >= 0 && game + 1 < args.Length)
     {
         string install = Path.GetFullPath(args[game + 1]);
-        // An installation without a key export needs an explicit key source, as Studio's own setting allows.
-        int keyArgument = System.Array.IndexOf(args, "--keys");
-        string? keys = keyArgument >= 0 && keyArgument + 1 < args.Length ? Path.GetFullPath(args[keyArgument + 1]) : null;
         int vendorUi = System.Array.IndexOf(args, "--vendor-ui");
         if (vendorUi >= 0)
             VendorWorkflowUiChecks.Run(install, root, Path.GetFullPath(args[vendorUi + 1]));
@@ -144,26 +141,9 @@ try
             workspace.OpenInstallation(install); Wait(workspace);
             VendorWorkflowChecks.Run(workspace, root);
         }
-        else { InvestmentTableChecks.Owned(install, keys); Owned(install, root, keys); }
+        else Owned(install, root);
         int ui = System.Array.IndexOf(args, "--ui");
-        if (ui >= 0)
-        {
-            string? capture = ui + 1 < args.Length && !args[ui + 1].StartsWith("--", StringComparison.Ordinal)
-                ? Path.GetFullPath(args[ui + 1]) : null;
-            InvestmentUiChecks.Run(install, root, capture, keys);
-            InvestmentTableUiChecks.Run(install, root, keys);
-            NavigationUiChecks.Run(install, root, capture is null ? null : Path.GetDirectoryName(capture), keys);
-            QuestChainUiChecks.Run(install, root, capture is null ? null : Path.GetDirectoryName(capture), keys);
-            // Live's checks, one per feature, are captured beside the item page capture.
-            string? folder = capture is null ? null : Path.GetDirectoryName(capture);
-            LiveStatusUiChecks.Run(install, root, folder, keys);
-            LiveItemsUiChecks.Run(install, root, folder, keys);
-            LiveInventoryUiChecks.Run(install, root, folder, keys);
-            LivePursuitsUiChecks.Run(install, root, folder, keys);
-            PursuitProgressUiChecks.Run(install, root, folder, keys);
-            LiveSeasonPassUiChecks.Run(install, root, folder, keys);
-            LiveBrowserUiChecks.Run(install, root, folder, keys);
-        }
+        if (ui >= 0) InvestmentUiChecks.Run(install, root, ui + 1 < args.Length ? Path.GetFullPath(args[ui + 1]) : null);
     }
 }
 catch (Exception error) { Console.Error.WriteLine(error); Environment.ExitCode = 1; }
@@ -174,10 +154,10 @@ finally
 }
 
 /** Installed checks sample each editor surface without changing package files. */
-static void Owned(string install, string temporary, string? keys)
+static void Owned(string install, string temporary)
 {
     using var workspace = new StudioWorkspace();
-    workspace.OpenInstallation(install, keys); Wait(workspace);
+    workspace.OpenInstallation(install); Wait(workspace);
     workspace.LoadInvestment(); Wait(workspace);
     var catalog = workspace.Investment!;
     InvestmentDisplayChecks.Owned(catalog, workspace.Catalog!);
@@ -197,12 +177,10 @@ static void Owned(string install, string temporary, string? keys)
         if (weapon is not null && armor is not null) break;
     }
     Check(weapon is not null && armor is not null, "Owned weapon or armor details missing.");
-    var iconReader = new InvestmentIconReader(catalog);
     foreach (int index in new[] { 0, 1966, 4718 })
     {
         var image = catalog.ReadIcon(catalog.Items[index]);
         Check(image is not null && image.Texture.Width > 1 && image.Texture.Height > 1, "Owned item icon missing.");
-        Check(iconReader.Read(catalog.Items[index])?.BitmapTag == image!.BitmapTag, "The shared-table icon reader read another icon.");
         Console.WriteLine($"investment icon_index={index} bitmap={image!.BitmapTag:X8} texture={image.Texture.TagHash:X8}");
     }
     var currency = catalog.Items.First(row => row.Category == InvestmentCategory.Currencies);

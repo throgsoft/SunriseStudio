@@ -36,9 +36,8 @@ internal sealed class QuestChainView : IDisposable
     private int shownOwner = -1, laidOut = -1;
     private float laidOutWidth;
     private (InvestmentCatalog? Catalog, InvestmentTables? Tables, int Owner, int Steps, float Font, int Open, string Held) modelKey;
-    private QuestModel? model;
     /** The model the chain last drew, or null before its steps are read. */
-    internal QuestModel? Shown => model;
+    private QuestModel? model;
 
     /** The chain and its steps' details, read in the background. */
     public QuestSteps Steps { get; } = new();

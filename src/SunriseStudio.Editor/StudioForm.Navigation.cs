@@ -7,8 +7,6 @@ public sealed partial class StudioForm
 {
     // Page ids: "live", "live:<section>[:<subtab>]", "asset:<page>", "world:scene", "world:mission", "world:report", "world:asset:<page>".
     private string? shownPage;
-    /** The page id history records for the frame last drawn, as "asset:sunrise.investment" or "live:investment:items". */
-    internal string ShownPage => shownPage ?? "";
     private StudioView? restoringView;
     private int restoringFrames, requestFrames;
     // A restored or requested tab can take a few frames to open. After this many frames the view is recorded as it is.

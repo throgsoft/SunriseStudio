@@ -14,13 +14,10 @@ public sealed partial class SeasonPassPage : IStudioPage, IStudioRowPage, IFrame
     private (int Progression, int Row)? requested;
     private readonly InvestmentTablesLoader loader = new();
     private readonly InvestmentIconCache icons = new();
-    internal InvestmentIconCache Icons => icons;
     private readonly InvestmentFieldPopup popup = new();
-    internal InvestmentFieldPopup Popup => popup;
     private readonly InvestmentPendingMarks pending = new();
     private readonly InvestmentRewardTree rewardTree = new();
     private readonly SeasonPassGrid grid = new();
-    internal SeasonPassGrid Grid => grid;
     // The row the Rewards tree last showed. Selecting another row clears the tree's selected entry.
     private (int Progression, int Row) treeRow = (-1, -1);
     public string Id => PageId;

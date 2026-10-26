@@ -15,9 +15,6 @@ internal sealed class InvestmentIconCache : IDisposable
     private readonly IconStream<InvestmentIcon, GpuTexture> stream = new();
     private InvestmentCatalog? catalog;
 
-    /** Uploaded icons, for checks. */
-    public int Uploaded => stream.Uploaded;
-
     /** Requests the item's icon, unless the item belongs to another catalog. @return Its texture once uploaded, else null. */
     public GpuTexture? Get(InvestmentCatalog source, int item) =>
         ReferenceEquals(source, catalog) && item >= 0 && item < source.Items.Count ? stream.Get(item) : null;

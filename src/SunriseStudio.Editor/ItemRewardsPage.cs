@@ -40,14 +40,12 @@ public sealed class ItemRewardsPage : IStudioPage, IFramePreparedPage, IDisposab
     private readonly InvestmentRewardTree tree = new();
     private readonly RewardClosureGraph graph = new();
     private readonly InvestmentIconCache icons = new();
-    internal InvestmentIconCache Icons => icons;
     private InvestmentCatalog? requestedVendors;
     private (InvestmentItemDetail? Detail, InvestmentTables? Tables, InvestmentVendorSales? Vendors) modelKey;
     private RewardsModel? model;
     private uint shownItem;
-    private bool graphView;
     /** True when the draw table shows as its closure graph instead of the tree. */
-    internal bool GraphView { get => graphView; set => graphView = value; }
+    private bool graphView;
     public string Id => PageId;
     public string Title => "Rewards";
 

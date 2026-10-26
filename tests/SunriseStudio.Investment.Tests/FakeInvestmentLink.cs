@@ -1,9 +1,6 @@
 using SunriseStudio.Live;
 
-/**
- * A scripted game behind the session's link interface. Each request waits for the check to answer it, or, with
- * Answer set, is answered at once from that function; a null answer leaves the request pending.
- */
+/** A scripted game behind the session's link interface. Each request waits for the check to answer it. */
 internal sealed class FakeInvestmentLink : ILiveInvestmentLink
 {
     private readonly object gate = new();
@@ -15,7 +12,6 @@ internal sealed class FakeInvestmentLink : ILiveInvestmentLink
     public List<LiveUnlockSource[]> Unlocks { get; } = [];
     /** Every operation sent, in order, with each argument the session passed after the operation identity. */
     public List<SentOperation> Sent { get; } = [];
-    public Func<string, object?>? Answer { get; set; }
     public bool Disposed { get; private set; }
 
     /** One operation as it reached the game: its kind, identity and arguments in the interface's order. */
@@ -48,7 +44,6 @@ internal sealed class FakeInvestmentLink : ILiveInvestmentLink
         lock (gate)
         {
             Calls.Add(name);
-            if (Answer?.Invoke(name) is { } value) { source.SetResult((T)value); return source.Task; }
             pending = (name, value => source.SetResult((T)value), error => source.SetException(error));
         }
         return source.Task;

@@ -10,6 +10,8 @@ internal static class InvestmentChecks
     private const ulong Account = 0x4000000000000002, Character = 0x4000000000000003, OtherCharacter = 0x4000000000000004;
     private const ulong Content = 0x1F2E3D4C5B6A7988, Started = 0x01DB1234ABCD5678;
     private const uint ItemHash = 0x80A10001, PlugHash = 0x80A10002, StackHash = 0x80A10003;
+    // The revision the scripted game's hello reports.
+    private const ulong HelloRevision = 7;
     private static readonly LiveInvestmentContext Bound = new(Account, Character, Content);
     // A command no Studio build knows, as a newer Sunrise may advertise.
     private const LiveInvestmentOpcode Unknown = (LiveInvestmentOpcode)63;
@@ -127,7 +129,8 @@ internal static class InvestmentChecks
     private static void Readers()
     {
         var hello = P.ReadHello(Reply(LiveInvestmentOpcode.Hello, Bound, HelloPayload()));
-        Check(hello is { Readiness: LiveInvestmentReadiness.Items | LiveInvestmentReadiness.Buckets, Revision: 7, GameStarted: Started }
+        Check(hello is { Readiness: LiveInvestmentReadiness.Items | LiveInvestmentReadiness.Buckets, GameStarted: Started }
+            && hello.Revision == HelloRevision
             && hello.Characters.Count == 2 && hello.Characters[0] is { Soid: Character, CharacterClass: 2, Selected: true }
             && hello.Publication.HasFlag(LiveInvestmentPublication.PeerOwnsAccount) && hello.Supports(LiveInvestmentOpcode.GrantItem)
             && !hello.Supports(LiveInvestmentOpcode.SetSeasonalExperience), "The hello layout differs.");
@@ -376,11 +379,15 @@ internal static class InvestmentChecks
         Check(game.Opcode == LiveInvestmentOpcode.Hello
             && game.Block().AsSpan(P.RequestPayloadBytesOffset - P.RequestBlockOffset).IndexOfAnyExcept((byte)0) < 0,
             "The hello request carries a payload, an operation or a context.");
-        game.Answer(request, LiveInvestmentStatus.Ok, Bound, HelloPayload(), answerId: request - 1);
-        await Task.Delay(100, token);
-        Check(!helloTask.IsCompleted, "An answer to an older request id was taken.");
+        // An answer under the previous request id carries another revision. Had the connection taken it, the hello it
+        // returns would carry that revision.
+        byte[] stale = HelloPayload();
+        U64(stale, P.HelloRevisionOffset, HelloRevision + 1);
+        game.Answer(request, LiveInvestmentStatus.Ok, Bound, stale, answerId: request - 1);
+        await game.ServicedAsync(token);
         game.Answer(request, LiveInvestmentStatus.Ok, Bound, HelloPayload());
         var hello = await helloTask.WaitAsync(token);
+        Check(hello.Revision == HelloRevision, "An answer to an older request id was taken.");
         // The connection sends only operations made from the game's last hello, so one from another game start never goes out.
         Check(hello.Context == Bound && connection.GrantItemAsync(LiveInvestmentOperation.Create(hello.Context, hello.GameStarted + 1),
             ItemHash, 1, token).IsFaulted, "The hello was not adopted.");
@@ -536,13 +543,14 @@ internal static class InvestmentChecks
 
         var check = connection.ReadReceiptAsync(lost.Id, token);
         request = await game.NextAsync(token);
+        // The late answer is a queued receipt and the real one unknown, so the receipt read shows which one was taken.
         game.Answer(unanswered, LiveInvestmentStatus.Ok, Bound, Receipt(lost.Id, LiveInvestmentOpcode.SetQuantity, LiveReceiptState.Queued),
             answerId: unanswered);
-        await Task.Delay(100, token);
-        Check(!check.IsCompleted, "A late answer to a timed-out request was taken.");
+        await game.ServicedAsync(token);
         game.Answer(request, LiveInvestmentStatus.Ok, default, Receipt(lost.Id, LiveInvestmentOpcode.None, LiveReceiptState.Unknown));
-        Check(await check.WaitAsync(token) is { State: LiveReceiptState.Unknown },
-            "A receipt the game never received did not resolve the operation.");
+        var checkedReceipt = await check.WaitAsync(token);
+        Check(checkedReceipt.State != LiveReceiptState.Queued, "A late answer to a timed-out request was taken.");
+        Check(checkedReceipt.State == LiveReceiptState.Unknown, "A receipt the game never received did not resolve the operation.");
         await Resolved(lost, "A receipt the game never received did not resolve the operation.");
 
         view.Write(P.GameVersionOffset, P.Version + 1);
@@ -596,6 +604,23 @@ internal static class InvestmentChecks
 
         public void Skip(uint request) => served = request;
 
+        /**
+         * Returns once Studio has serviced the mapping in full after every write made before the call. A pass writes the
+         * heartbeat and then reads the response under one lock, but its read may precede its own heartbeat write. So the
+         * second pass to write a new heartbeat sees the earlier writes, and a third starts only once the second has finished.
+         */
+        public async Task ServicedAsync(CancellationToken token)
+        {
+            Thread.MemoryBarrier();
+            long seen = view.ReadInt64(P.HeartbeatOffset);
+            for (int passes = 0; passes < 3;)
+            {
+                await Task.Delay(1, token);
+                long beat = view.ReadInt64(P.HeartbeatOffset);
+                if (beat != seen) { seen = beat; passes++; }
+            }
+        }
+
         public void Answer(uint request, LiveInvestmentStatus status, LiveInvestmentContext context, byte[] payload, string reason = "",
             uint? answerId = null)
         {
@@ -629,7 +654,7 @@ internal static class InvestmentChecks
         U64(bytes, P.HelloCharactersOffset, Character);
         bytes[P.HelloCharactersOffset + P.CharacterClassOffset] = 2; bytes[P.HelloCharactersOffset + P.CharacterSelectedOffset] = 1;
         U64(bytes, P.HelloCharactersOffset + P.CharacterBytes, OtherCharacter);
-        U64(bytes, P.HelloRevisionOffset, 7);
+        U64(bytes, P.HelloRevisionOffset, HelloRevision);
         return bytes;
     }
 

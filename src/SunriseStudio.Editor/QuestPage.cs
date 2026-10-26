@@ -24,9 +24,6 @@ public sealed class QuestPage : IStudioPage, IStudioRowPage, IFramePreparedPage,
     private readonly InvestmentIconCache icons = new();
     private readonly QuestChainView chain = new();
     private readonly PursuitInspector inspector = new();
-    internal InvestmentIconCache Icons => icons;
-    internal QuestChainView Chain => chain;
-    internal PursuitInspector Inspector => inspector;
     private string selected = "";
     // The step member that history or a link asked for, selected once the chain is known.
     private int? requested;

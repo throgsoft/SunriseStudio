@@ -36,9 +36,6 @@ internal sealed partial class PursuitInspector
         public ProgressRow Row => Rows[Ordinal];
     }
 
-    /** The operation the shown copy's line drew in the last Overview, or null when it drew none, for checks. */
-    internal LiveOperation? ShownOperation { get; private set; }
-
     /** Complete objectives for the shown copy, then the character it goes to. */
     private void DrawCompleteObjectives(Step step)
     {
@@ -63,11 +60,10 @@ internal sealed partial class PursuitInspector
      * The latest Set progress or Complete objectives on the shown copy, once above its objectives, so a result shows whether
      * or not the copy offers Complete objectives.
      */
-    private void DrawCopyOperation(Step step)
+    private static void DrawCopyOperation(Step step)
     {
         var live = step.Session;
-        ShownOperation = step.Held is { } held ? live.LastFor(LiveAction.InstanceKey(held.Instance)) : null;
-        LiveOperationLine.Draw(live, ShownOperation);
+        LiveOperationLine.Draw(live, step.Held is { } held ? live.LastFor(LiveAction.InstanceKey(held.Instance)) : null);
     }
 
     /** Set progress for one objective of the shown copy, on the line of its value. */

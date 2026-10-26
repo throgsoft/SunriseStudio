@@ -6,19 +6,19 @@ using SunriseStudio.Rendering;
 internal static class InvestmentUiChecks
 {
     /** Real frames must discard old drafts before an identical tag can be edited in another project. */
-    public static void Run(string install, string temporary, string? capture, string? keys)
+    public static void Run(string install, string temporary, string? capture)
     {
         Exception? failure = null;
         var thread = new Thread(() =>
         {
-            try { CheckFrames(install, temporary, capture, keys); }
+            try { CheckFrames(install, temporary, capture); }
             catch (Exception error) { failure = error; }
         });
         thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
         if (failure is not null) throw new InvalidOperationException("Investment UI check failed.", failure);
     }
 
-    private static void CheckFrames(string install, string temporary, string? capture, string? keys)
+    private static void CheckFrames(string install, string temporary, string? capture)
     {
         var one = StudioProject.Create(Path.Combine(temporary, "ui-one"), "First project");
         var two = StudioProject.Create(Path.Combine(temporary, "ui-two"), "Second project");
@@ -26,7 +26,7 @@ internal static class InvestmentUiChecks
         new StudioSettings { DiskCacheEnabled = false }.Save(settings);
         using var form = new StudioForm(new(Game: install, Project: one.ManifestPath, Tag: 0x81319AF9,
             Page: "Investment", Warp: true, Smoke: true, Frames: 200, WaitForNames: true,
-            SettingsPath: settings, Capture: capture, KeySource: keys));
+            SettingsPath: settings, Capture: capture));
         const BindingFlags access = BindingFlags.Instance | BindingFlags.NonPublic;
         int phase = 0, count = 0;
         // The smoke budget counts frames after the editor is ready and names are indexed.

@@ -16,8 +16,6 @@ internal sealed partial class LiveInvestmentSection(StudioWorkspace workspace) :
     private readonly InvestmentTablesLoader loader = new();
     private readonly InvestmentIconCache icons = new();
     private readonly LiveItemActions actions = new();
-    internal InvestmentIconCache Icons => icons;
-    internal LiveItemActions Actions => actions;
     // The UI scale of the frame being drawn.
     private float scale = 1;
 

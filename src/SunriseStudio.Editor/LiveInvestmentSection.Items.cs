@@ -13,7 +13,6 @@ internal sealed partial class LiveInvestmentSection
     private const float HeaderIcon = 72;
     // The shared item catalog view. A click chooses the item this subtab acts on and does not open it in Assets.
     private readonly ItemCatalogView itemList = new();
-    internal ItemCatalogView ItemList => itemList;
     // The chosen item's definition hash, which history records as "item:<hash>".
     private uint? chosenItem;
 

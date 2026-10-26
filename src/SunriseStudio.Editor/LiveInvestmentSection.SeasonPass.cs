@@ -17,8 +17,6 @@ internal sealed partial class LiveInvestmentSection
     private LiveMatch? liveMatch;
     /** The game's season pass rows while the shown progression is the game's pass, otherwise null. */
     private IReadOnlyList<LiveSeasonPassRow>? shownLive;
-    /** True while the shown progression matches the game's pass, so its claim state is drawn. */
-    internal bool PassMatched => shownLive is not null;
     /** Whether the game had a character selected when it evaluated shownLive's conditions. */
     private bool shownCharacter;
     private PassDraft? passDraft;

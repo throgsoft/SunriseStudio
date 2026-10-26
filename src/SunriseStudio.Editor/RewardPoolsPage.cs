@@ -18,7 +18,6 @@ public sealed class RewardPoolsPage : IStudioPage, IStudioRowPage, IFramePrepare
     private readonly InvestmentPendingMarks pending = new();
     private readonly InvestmentRewardTree tree = new();
     private readonly InvestmentIconCache icons = new();
-    internal InvestmentIconCache Icons => icons;
     private int selected = -1;
     private bool scrollToSelected;
     private string search = "";

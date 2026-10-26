@@ -90,9 +90,6 @@ internal static class InvestmentLinkStatus
         ImGui.TextDisabled($"The game uses the installed version of this {noun}.");
     }
 
-    /** The indicator's first words, as "Investment not opened" or the character's class. */
-    internal static string Headline(LiveInvestmentSession live) => Parts(live).Parts[0].Text;
-
     private static (Vector4 Dot, List<Part> Parts) Parts(LiveInvestmentSession live)
     {
         string process = live.Process is { } bound ? $"Process {bound.Id}" : "";

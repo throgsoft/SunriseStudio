@@ -157,7 +157,6 @@ public static class LiveInvestmentProtocol
     public const int RequestPayloadOffset = 104;
     public const int StatusOffset = 144, ResponseReservedOffset = 148, ResponseOperationOffset = 152, ResponseOpcodeOffset = 160;
     public const int ResponsePayloadBytesOffset = 164, ContextOffset = 168, ReasonOffset = 192;
-    public const int ContextBytes = 24;
 
     public const int GrantItemBytes = 8, SetQuantityBytes = 32, SetSeasonalExperienceBytes = 8, SeasonPassRowBytes = 8;
     public const int GrantHashOffset = 0, GrantQuantityOffset = 4;

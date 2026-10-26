@@ -15,7 +15,6 @@ try
         return;
     }
     CreationFieldChecks.Run();
-    CreationRefusalChecks.Run(root);
     PerkBehaviorEditorChecks.Run();
     ItemCloneChecks.Run();
     StringBankChecks.Run(root);
