@@ -8,6 +8,9 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        // A smoke run reports failures on stderr only, with no crash log and no message box.
+        bool smoke = args.Contains("--smoke");
+        if (!smoke) LogCrashes();
         try
         {
             if (args.Contains("--help"))
@@ -30,9 +33,30 @@ internal static class Program
         catch (Exception error)
         {
             Console.Error.WriteLine(error);
-            if (!args.Contains("--smoke")) MessageBox.Show(error.Message, "Sunrise Studio");
+            if (!smoke) MessageBox.Show(StudioCrashLog.Message(error, StudioCrashLog.Write(error, "Startup")), "Sunrise Studio");
             return 1;
         }
+    }
+
+    /** Writes every uncaught exception to the crash log. One on the window thread also shows a message and closes Studio. */
+    private static void LogCrashes()
+    {
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) =>
+        {
+            MessageBox.Show(StudioCrashLog.Message(e.Exception, StudioCrashLog.Write(e.Exception, "Window thread")), "Sunrise Studio");
+            Application.Exit();
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is Exception error) StudioCrashLog.Write(error, "Unhandled exception");
+        };
+        // A failed task nobody awaited is logged, and Studio keeps running.
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            StudioCrashLog.Write(e.Exception, "Unobserved task");
+            e.SetObserved();
+        };
     }
 
     /** An unknown option or a missing value throws. */

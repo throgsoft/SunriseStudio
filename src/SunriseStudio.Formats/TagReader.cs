@@ -48,6 +48,19 @@ internal sealed class TagReader(ReadOnlyMemory<byte> memory)
         return ((int)count, data, type);
     }
 
+    /**
+     * Follows a relative field to a class-tagged block, whose class sits in the four bytes before it.
+     * @return The block's offset, or -1 when the field is null.
+     */
+    public int Block(int field, uint expectedClass)
+    {
+        int target = Relative(field);
+        if (target < 0) return -1;
+        if (target < 4 || U32(target - 4) != expectedClass)
+            throw new InvalidDataException($"Unexpected block class at 0x{field:X}.");
+        return target;
+    }
+
     /** Optional extensions require a matching typed array before their bytes gain meaning. */
     public bool TryArray(int field, uint expectedClass, int stride,
         out (int Count, int Data, uint Class) result)

@@ -23,6 +23,7 @@ if (args is ["--audit-live-library"]) { LiveAuditChecks.Run().GetAwaiter().GetRe
 LiveAuditChecks.Run().GetAwaiter().GetResult();
 WorldScaleChecks.Run();
 CuiChecks.Run();
+InvestmentChecks.Run().GetAwaiter().GetResult();
 var frame = new byte[128];
 void U(int at, uint value) => BinaryPrimitives.WriteUInt32LittleEndian(frame.AsSpan(at), value);
 void F(int at, float value) => BinaryPrimitives.WriteSingleLittleEndian(frame.AsSpan(at), value);

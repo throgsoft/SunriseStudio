@@ -62,6 +62,8 @@ public sealed record StudioDocument(PackageEntry Entry, string Name, byte[] Byte
     public string Kind { get; init; } = "";
     /** The assembled guardian of a guardian view; null for every other document. */
     public PreparedGuardian? Guardian { get; init; }
+    /** True when the asset opened on its data alone and its model reads only when asked for. */
+    public bool ModelDeferred { get; init; }
 }
 
 /** Workers read assets; the window thread adopts results and owns project mutations. */
@@ -311,9 +313,19 @@ public sealed partial class StudioWorkspace : IDisposable
         };
     }
 
-    /** @param keepView Keeps the open document on screen while this one reads, in place of the loading screen. */
+    /** Reads the open document's deferred model, in the view it was opened for. */
+    public void LoadModel()
+    {
+        if (Document is { ModelDeferred: true } document) SelectAsset(document.Entry.TagHash, document.OpenContext, deferModel: false);
+    }
+
+    /**
+     * @param keepView Keeps the open document on screen while this one reads, in place of the loading screen.
+     * @param deferModel True defers the model and false reads it. Null keeps a reread document's state, and defers the model
+     * when a deferring category's view opens without a context.
+     */
     private void SelectAsset(uint tag, AssetOpenContext? context = null, uint previewVariant = 0, SpawnPick? spawn = null,
-        bool keepView = false)
+        bool keepView = false, bool? deferModel = null)
     {
         if (Catalog is not { } catalog || IsBusy) return;
         if (context is { WeaponItemTag: > 0, WeaponEffectClipTag: 0 }
@@ -333,12 +345,17 @@ public sealed partial class StudioWorkspace : IDisposable
         }
         string name = DisplayName(entry);
         // No context opens the category view; an explicit empty context is a plain open.
-        context ??= DefaultContext(tag);
-        bool preview = World is null || entry.Reference is not (0x808091DE or 0x80809994);
+        var view = context ?? DefaultContext(tag);
+        // Rereading the open view keeps its model state. A deferring category's view opened without a context reads its data alone.
+        bool deferred = deferModel ?? (Document is { } open && open.Entry.TagHash == tag && SameView(open.OpenContext, view)
+            ? open.ModelDeferred
+            : context is null && Names is { } names && StudioCategories.ForKind(BrowserKind(entry, names).Kind)?.DeferModel == true);
+        context = view;
+        bool preview = (World is null || entry.Reference is not (0x808091DE or 0x80809994)) && !deferred;
         BeginWork($"Opening {name}", () =>
         {
             var document = ReadDocument(catalog, entry, name, preview, context, previewVariant, spawn)
-                with { AddedAssetId = addedId };
+                with { AddedAssetId = addedId, ModelDeferred = deferred };
             return () =>
             {
                 Document = document;
@@ -980,6 +997,7 @@ public sealed partial class StudioWorkspace : IDisposable
             try { pending.GetAwaiter().GetResult()(); }
             catch (Exception) { }
         }
+        LiveInvestment.Dispose();
         Catalog?.Dispose();
         operationCancellation?.Dispose();
         lifetime.Dispose();

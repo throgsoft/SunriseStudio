@@ -72,8 +72,9 @@ public sealed partial class LivePage
     private void DrawScreens(StudioWorkspace workspace)
     {
         screensShown = true;
-        connection!.OpenCui();
         StudioUi.Heading("Open screens", StudioUi.MayBeInaccurate);
+        if (connection is null) { ImGui.TextDisabled("No screen data yet"); return; }
+        connection.OpenCui();
         if (cuiStatus.Length > 0) ImGui.TextDisabled(cuiStatus);
         if (connection.CuiScreens is not { } screens) { ImGui.TextDisabled("Waiting for the game"); return; }
         if (!connection.CuiAlive) ImGui.TextDisabled("Stale: game stopped answering");

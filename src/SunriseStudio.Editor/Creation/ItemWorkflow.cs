@@ -332,7 +332,7 @@ public sealed class ItemWorkflow : CreationWorkflow
             // A display record names its item; the base is the item record.
             if (source.Tag != tag) { baseItem.Tag = loadedBase = source.Tag; baseItem.TagLabel = source.Name; }
             detailBytes = workspace.Catalog!.Read(source.Tag);
-            detail = investment.ReadItem(source.Tag, detailBytes);
+            detail = investment.ReadItemRows(source.Tag, detailBytes);
             plugItem = category == InvestmentItemKinds.Mods || Block(PlugBlock);
             bucket.Visible = sockets.Visible = !plugItem;
             perkIcon.Visible = editing is not null && plugItem;

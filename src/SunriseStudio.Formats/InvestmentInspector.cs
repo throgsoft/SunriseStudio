@@ -32,6 +32,19 @@ public sealed class InvestmentInspector : IAssetInspector
             }
             sections.Add(new("Items", [], rows));
         }
+        if (context.ClassHash == InvestmentRoot.RootClass)
+        {
+            List<AssetNode> rows = [];
+            for (int slot = 0, at = 8; r.Has(at, 16); slot++, at += 16)
+            {
+                uint tag = r.U32(at);
+                List<AssetProperty> properties = [r.UInt("Table tag", at, hex: true)];
+                if (tag == InvestmentRoot.OmittedSlot) properties.Add(new("Table", "Omitted by this installation"));
+                else if (context.ResolveName?.Invoke(tag) is { Length: > 0 } name) properties.Add(new("Table", name));
+                rows.Add(new($"Slot {slot}", properties));
+            }
+            sections.Add(new("Root slots", [], rows));
+        }
         if (context.ClassHash == 0x8080306D)
         {
             var array = r.Array(8, 0x80803475, 184);

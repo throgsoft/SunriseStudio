@@ -55,15 +55,24 @@ internal static class WeaponSceneUiChecks
                 if (++frames < 5 || workspace.LoadedWeapon is not { } loaded || loaded.Weapon != weapon) return;
                 Check(loaded.Receipt && loaded.Owned && loaded.Art is not null && loaded.Errors.Count == 0,
                     "The Weapon page did not read the created weapon: " + string.Join("; ", loaded.Errors));
-                // A plain open is the weapon view: the model loads with the item.
-                Check(workspace.Document is { Scene: not null } opened
-                    && ReferenceEquals(form.AssetPreviewViewport!.Scene, opened.Scene)
+                // A plain open reads the item alone; the model pane beside the tabs offers Load model.
+                Check(workspace.Document is { ModelDeferred: true, Scene: null } opened
                     && StudioCategories.ForKind(opened.Kind)?.ModelPane == true,
-                    "Opening the weapon did not show its model beside the tabs.");
+                    "Opening the weapon read its model, or left the model pane.");
+                Capture("weapon-page-deferred");
+                workspace.LoadModel(); phase++; frames = 0; return;
+            }
+            if (phase == 2)
+            {
+                if (++frames < 5) return;
+                // Load model reads the weapon view, and the model shows beside the tabs.
+                Check(workspace.Document is { ModelDeferred: false, Scene: not null } opened && opened.Entry.TagHash == weapon
+                    && ReferenceEquals(form.AssetPreviewViewport!.Scene, opened.Scene),
+                    "Load model did not show the weapon's model beside the tabs.");
                 Capture("weapon-page");
                 workspace.OpenWeaponModel(weapon); phase++; frames = 0; return;
             }
-            if (phase == 2)
+            if (phase == 3)
             {
                 if (++frames < 5) return;
                 var viewport = form.AssetPreviewViewport!;
@@ -81,7 +90,7 @@ internal static class WeaponSceneUiChecks
                 AssertScene(); Capture("scene-bind-pose");
                 viewport.Animation.SelectClip(clips[0].Tag); phase++; frames = 0; return;
             }
-            if (phase == 3)
+            if (phase == 4)
             {
                 var animation = form.AssetPreviewViewport!.Animation!;
                 if (animation.IsLoading || ++frames < 8) return;
@@ -100,7 +109,7 @@ internal static class WeaponSceneUiChecks
         };
         Application.Run(form);
         if (form.Failure is { } error) throw new InvalidDataException(error);
-        Check(phase == 4, "The weapon scene check did not finish.");
+        Check(phase == 5, "The weapon scene check did not finish.");
 
         void AssertScene()
         {

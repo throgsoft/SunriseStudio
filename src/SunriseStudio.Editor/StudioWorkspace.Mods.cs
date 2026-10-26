@@ -5,9 +5,26 @@ using SunriseStudio.Projects;
 
 namespace SunriseStudio.Editor;
 
+/** Where a project change stands against the game. Studio cannot see which mods the game loaded, so it compares times. */
+public enum ProjectInstallState { Unchanged, InProject, InstalledRestart, InstalledBeforeGame }
+
 public sealed partial class StudioWorkspace
 {
     public ModInstallResult? LastInstall { get; private set; }
+    /** Project result hashes of the edited and added tags at this session's last Build and install. */
+    private IReadOnlyDictionary<uint, string> installedResults = new Dictionary<uint, string>();
+    private DateTime? installedAt;
+
+    /** @param gameStarted Start time of the connected game, or null when none is connected. */
+    public ProjectInstallState InstallStateOf(uint tag, DateTime? gameStarted = null)
+    {
+        if (!IsModified(tag)) return ProjectInstallState.Unchanged;
+        string? current = Project?.Changes.FirstOrDefault(change => change.TagHash == tag)?.ResultSha256
+            ?? (nativeAdditions.TryGetValue(tag, out var added) ? added.Sha256 : null);
+        if (installedAt is not { } installed || current is null || installedResults.GetValueOrDefault(tag) != current)
+            return ProjectInstallState.InProject;
+        return gameStarted > installed ? ProjectInstallState.InstalledBeforeGame : ProjectInstallState.InstalledRestart;
+    }
 
     public void SetModMetadata(ModMetadata? metadata)
     {
@@ -44,12 +61,15 @@ public sealed partial class StudioWorkspace
         CompactSavedTables();
         var project = Project!;
         var catalog = Catalog!;
+        var results = project.Changes.ToDictionary(change => change.TagHash, change => change.ResultSha256);
+        foreach (var (tag, added) in nativeAdditions) results.TryAdd(tag, added.Sha256);
         BeginWork("Installing mod", () =>
         {
             var result = ModInstaller.BuildAndInstall(project, catalog, MissionProject.ModScripts(project), ReportProgress);
             return () =>
             {
                 LastInstall = result;
+                installedResults = results; installedAt = DateTime.Now;
                 if (result.Build is not null) LastBuild = result.Build;
                 Status = "Mod installed";
                 Notice = new("Mod installed. Restart the game to load it.", false, result.ModDirectory,

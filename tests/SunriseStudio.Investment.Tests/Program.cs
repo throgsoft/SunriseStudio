@@ -17,6 +17,8 @@ try
     InvestmentArrayChecks.SocketTypes();
     InvestmentArrayChecks.PerkDisplays();
     InvestmentSocketChecks.Run(root);
+    InvestmentTableChecks.Run(root);
+    LiveInvestmentSessionChecks.Run();
     const uint first = 0x80A00000;
     var text = Strings(first + 8, ["Fixture rifle", "Auto Rifle", "Owned flavor", "Fixture plug", "Damage", "Quartermaster", "Range"]);
     byte[] item = new byte[768]; I(item, 180, 1); item[184] = 0; item[186] = 4; item[187] = 1;
@@ -70,6 +72,7 @@ try
     using (var catalog = PackageCatalog.Open(Path.Combine(root, "install"), cacheOptions: new() { Enabled = false }))
     {
         var data = InvestmentCatalog.Load(catalog, sources: source);
+        InvestmentTableChecks.NoRoot(data, first + 2, item);
         InvestmentVendorNameChecks.Run(catalog, source, first + 13);
         VendorAuthoringChecks.Run(catalog, data, source, first + 12, first + 13, first + 20);
         InvestmentArrayChecks.Run(data, catalog, first + 2, first + 3, root);
@@ -81,6 +84,10 @@ try
             && image.Texture.Subresources[0].Data.SequenceEqual(new byte[] { 12, 34, 56, 255 }),
             "Shared icon index did not resolve the authored image.");
         Check(data.ReadIcon(data.Items[1]) is null, "Unset icon index resolved an image.");
+        var reader = new InvestmentIconReader(data);
+        Check(reader.Read(data.Items[0])?.BitmapTag == image!.BitmapTag && reader.Read(data.Items[1]) is null
+            && reader.Read(data.Items[0])?.Texture.Subresources[0].Data.SequenceEqual(image.Texture.Subresources[0].Data) == true,
+            "The shared-table icon reader differs from a single read.");
         var detail = data.ReadItem(first + 2, catalog.Read(first + 2));
         Check(detail.Diagnostics.Count == 0 && detail.Stats.Single().Name == "Damage" && detail.Stats[0].Value == 45, "Stat decode failed.");
         Check(detail.Sockets.Single().PlugName == "Fixture plug" && detail.Sockets[0].AllowedPlugs.SequenceEqual(new ushort[] { 1 }), "Plug references failed.");
@@ -88,6 +95,8 @@ try
         var seller = data.ReadVendor(first + 12, catalog.Read(first + 12));
         Check(seller.Sales.Single().Name == "Fixture rifle" && seller.Sales[0].Costs.Single().Quantity == 250
             && !seller.Sales[0].Costs[0].Conditional, "Vendor sale and plain cost decode failed.");
+        Check(!data.VendorSalesLoaded && data.VendorSales().Selling(0).SequenceEqual([0]) && data.VendorSales().Selling(1).Count == 0
+            && data.VendorSalesLoaded && data.VendorSales() is { Rows: 1, Problems.Count: 0 }, "Vendor sales were not indexed by item.");
         byte[] changed = data.Edit(first + 2, item, detail.Stats[0].Field, "67");
         Check(OnlyRange(item, changed, 276, 4) && data.ReadItem(first + 2, changed).Stats[0].Value == 67, "Stat edit changed unrelated bytes.");
         Reject(() => data.Edit(first + 2, item, detail.Fields[0], "-1"));
@@ -123,6 +132,9 @@ try
     if (game >= 0 && game + 1 < args.Length)
     {
         string install = Path.GetFullPath(args[game + 1]);
+        // An installation without a key export needs an explicit key source, as Studio's own setting allows.
+        int keyArgument = System.Array.IndexOf(args, "--keys");
+        string? keys = keyArgument >= 0 && keyArgument + 1 < args.Length ? Path.GetFullPath(args[keyArgument + 1]) : null;
         int vendorUi = System.Array.IndexOf(args, "--vendor-ui");
         if (vendorUi >= 0)
             VendorWorkflowUiChecks.Run(install, root, Path.GetFullPath(args[vendorUi + 1]));
@@ -132,9 +144,26 @@ try
             workspace.OpenInstallation(install); Wait(workspace);
             VendorWorkflowChecks.Run(workspace, root);
         }
-        else Owned(install, root);
+        else { InvestmentTableChecks.Owned(install, keys); Owned(install, root, keys); }
         int ui = System.Array.IndexOf(args, "--ui");
-        if (ui >= 0) InvestmentUiChecks.Run(install, root, ui + 1 < args.Length ? Path.GetFullPath(args[ui + 1]) : null);
+        if (ui >= 0)
+        {
+            string? capture = ui + 1 < args.Length && !args[ui + 1].StartsWith("--", StringComparison.Ordinal)
+                ? Path.GetFullPath(args[ui + 1]) : null;
+            InvestmentUiChecks.Run(install, root, capture, keys);
+            InvestmentTableUiChecks.Run(install, root, keys);
+            NavigationUiChecks.Run(install, root, capture is null ? null : Path.GetDirectoryName(capture), keys);
+            QuestChainUiChecks.Run(install, root, capture is null ? null : Path.GetDirectoryName(capture), keys);
+            // Live's checks, one per feature, are captured beside the item page capture.
+            string? folder = capture is null ? null : Path.GetDirectoryName(capture);
+            LiveStatusUiChecks.Run(install, root, folder, keys);
+            LiveItemsUiChecks.Run(install, root, folder, keys);
+            LiveInventoryUiChecks.Run(install, root, folder, keys);
+            LivePursuitsUiChecks.Run(install, root, folder, keys);
+            PursuitProgressUiChecks.Run(install, root, folder, keys);
+            LiveSeasonPassUiChecks.Run(install, root, folder, keys);
+            LiveBrowserUiChecks.Run(install, root, folder, keys);
+        }
     }
 }
 catch (Exception error) { Console.Error.WriteLine(error); Environment.ExitCode = 1; }
@@ -145,10 +174,10 @@ finally
 }
 
 /** Installed checks sample each editor surface without changing package files. */
-static void Owned(string install, string temporary)
+static void Owned(string install, string temporary, string? keys)
 {
     using var workspace = new StudioWorkspace();
-    workspace.OpenInstallation(install); Wait(workspace);
+    workspace.OpenInstallation(install, keys); Wait(workspace);
     workspace.LoadInvestment(); Wait(workspace);
     var catalog = workspace.Investment!;
     InvestmentDisplayChecks.Owned(catalog, workspace.Catalog!);
@@ -168,10 +197,12 @@ static void Owned(string install, string temporary)
         if (weapon is not null && armor is not null) break;
     }
     Check(weapon is not null && armor is not null, "Owned weapon or armor details missing.");
+    var iconReader = new InvestmentIconReader(catalog);
     foreach (int index in new[] { 0, 1966, 4718 })
     {
         var image = catalog.ReadIcon(catalog.Items[index]);
         Check(image is not null && image.Texture.Width > 1 && image.Texture.Height > 1, "Owned item icon missing.");
+        Check(iconReader.Read(catalog.Items[index])?.BitmapTag == image!.BitmapTag, "The shared-table icon reader read another icon.");
         Console.WriteLine($"investment icon_index={index} bitmap={image!.BitmapTag:X8} texture={image.Texture.TagHash:X8}");
     }
     var currency = catalog.Items.First(row => row.Category == InvestmentCategory.Currencies);

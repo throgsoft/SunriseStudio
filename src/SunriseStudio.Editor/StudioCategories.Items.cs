@@ -9,8 +9,14 @@ namespace SunriseStudio.Editor;
 /** Investment item, vendor and perk categories; item kinds come from the cached item facts. */
 public static partial class StudioCategories
 {
-    internal const string VendorsName = "Vendors", PerksName = "Perks";
-    private static readonly string[] ItemSections = ["sunrise.investment", "sunrise.related"];
+    internal const string VendorsName = "Vendors", PerksName = "Perks", SeasonPassName = "Season pass", RewardPoolsName = "Reward pools";
+    internal const string InvestmentTablesName = "Investment tables";
+    private static readonly string[] ItemSections = ["sunrise.investment", ItemRewardsPage.PageId, "sunrise.related"];
+    // Categories follow the type line rather than the pursuit's shape, so Quests and Bounties both list both pursuit pages.
+    // Either page counts as the category's view.
+    private static readonly string[] QuestSections = [QuestPage.PageId, PursuitPage.PageId, "sunrise.investment", ItemRewardsPage.PageId, "sunrise.related"];
+    private static readonly string[] BountySections = [PursuitPage.PageId, QuestPage.PageId, "sunrise.investment", ItemRewardsPage.PageId, "sunrise.related"];
+    private const int PursuitViews = 2;
     // One shared kind string per category and type; item and content rows repeat a few hundred kinds.
     private static readonly ConcurrentDictionary<(string Category, string Type), string> ItemKinds = new();
 
@@ -41,20 +47,48 @@ public static partial class StudioCategories
     {
         categories.Add(new(InvestmentItemKinds.Weapons, "Weapons", ItemsGroup, StudioIcon.Spark,
             "Weapons with their stats, perks, model and parts",
-            ["sunrise.investment", "sunrise.weapon", "sunrise.scene", "sunrise.materials", "sunrise.shaders", "sunrise.related"],
-            ModelPane: true, OpenContext: tag => new AssetOpenContext { WeaponItemTag = tag }));
+            ["sunrise.investment", ItemRewardsPage.PageId, "sunrise.weapon", "sunrise.scene", "sunrise.materials", "sunrise.shaders", "sunrise.related"],
+            ModelPane: true, OpenContext: tag => new AssetOpenContext { WeaponItemTag = tag }, DeferModel: true));
         foreach (string name in InvestmentItemKinds.Categories)
         {
             if (name == InvestmentItemKinds.Weapons) continue;
             var (icon, tooltip) = ItemLooks.TryGetValue(name, out var look) ? look : (StudioIcon.Cube, name);
             bool model = name is InvestmentItemKinds.Armor or InvestmentItemKinds.Ghosts
                 or InvestmentItemKinds.Vehicles or InvestmentItemKinds.Ships;
-            categories.Add(new(name, name, ItemsGroup, icon, tooltip, ItemSections, ModelPane: model));
+            bool pursuits = name is InvestmentItemKinds.Quests or InvestmentItemKinds.Bounties;
+            var sections = name == InvestmentItemKinds.Quests ? QuestSections : name == InvestmentItemKinds.Bounties ? BountySections : ItemSections;
+            // Only a model pane has the Load model button, so only those kinds open without their model.
+            categories.Add(new(name, name, ItemsGroup, icon, tooltip, sections, ModelPane: model, Views: pursuits ? PursuitViews : 1,
+                DeferModel: model));
         }
         categories.Add(new(VendorsName, VendorsName, ItemsGroup, StudioIcon.Group, "Vendors and what they sell", ItemSections));
         categories.Add(new(PerksName, PerksName, ItemsGroup, StudioIcon.Build, "Perk gameplay programs",
             ["sunrise.perk-behavior", "sunrise.graph", "sunrise.related"]));
+        categories.Add(new(SeasonPassName, SeasonPassName, TablesGroup, StudioIcon.Grid, "Progression ranks and their rewards",
+            [SeasonPassPage.PageId, "sunrise.related"], Home: false));
+        categories.Add(new(RewardPoolsName, RewardPoolsName, TablesGroup, StudioIcon.Tree, "Reward pools of engrams and packages",
+            [RewardPoolsPage.PageId, "sunrise.related"], Home: false));
+        categories.Add(new(InvestmentTablesName, InvestmentTablesName, TablesGroup, StudioIcon.Folder,
+            "Buckets and reward sites of the installed investment data", [BucketsPage.PageId, RewardSitesPage.PageId, "sunrise.related"],
+            Home: false));
     }
+
+    /** The rows of the home view's Tables group. Each opens one table of the investment root on its page. */
+    internal static readonly StudioTableRow[] Tables =
+    [
+        new("Season pass", StudioIcon.Grid, "Progression ranks and their rewards", SeasonPassName, SeasonPassPage.PageId,
+            catalog => Root(catalog).SlotTag(InvestmentRootSlots.Progressions)),
+        new("Reward pools", StudioIcon.Tree, "Reward pools of engrams and packages", RewardPoolsName, RewardPoolsPage.PageId,
+            catalog => Root(catalog).SlotTag(InvestmentRootSlots.Pools)),
+        new("Reward sites", StudioIcon.Pin, "Where items and pools name reward sites", InvestmentTablesName, RewardSitesPage.PageId,
+            catalog => Root(catalog).Tag),
+        new("Buckets", StudioIcon.Folder, "Inventory buckets and their installed items", InvestmentTablesName, BucketsPage.PageId,
+            catalog => Root(catalog).Tag)
+    ];
+
+    /** The installation's investment root, whose slots name the tables. */
+    private static InvestmentRoot Root(PackageCatalog catalog) =>
+        InvestmentRoot.Locate(catalog, new InvestmentSources().Root, out string why) ?? throw new InvalidDataException(why);
 
     static partial void ClassifyItem(PackageEntry entry, StudioNameIndex names, ref StudioCategoryMatch? match)
     {
@@ -72,6 +106,10 @@ public static partial class StudioCategories
                 break;
             case InvestmentCatalog.VendorClass: match = new(VendorsName); break;
             case InvestmentSandboxPerkAuthoring.GameplayClass: match = new(PerksName); break;
+            // The installed build has one asset of each table class. The pages check that it is the root's table.
+            case InvestmentSeasonPass.TableClass: match = new(SeasonPassName, "season pass progression ranks rewards"); break;
+            case InvestmentRewards.TableClass: match = new(RewardPoolsName, "reward pools engram packages"); break;
+            case InvestmentRoot.RootClass: match = new(InvestmentTablesName, "investment tables buckets reward sites"); break;
         }
     }
 }

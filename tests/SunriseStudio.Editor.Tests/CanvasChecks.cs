@@ -118,7 +118,23 @@ internal static class CanvasChecks
             catch (InvalidDataException) { }
             Check(ReferenceEquals(source, document) && document.Edges.Count == 2,
                 "An invalid reconnect discarded the original graph dependency.");
-            Console.WriteLine("mission_canvas fast_drag=pass moved_ports=pass detach=pass reconnect=atomic blur=cancelled capture=cancelled");
+            // A header icon moves the title, not the node: a chain lays out the same with icons, loaded or still loading, as without.
+            CanvasNode[] bare = [new("p", "P", "", Rows: ["row"]), new("q", "Q", ""), new("r", "R", "")];
+            CanvasEdge[] chain = [new("p", "q", false), new("q", "r", false)];
+            var layouts = new[] { bare, [.. bare.Select(node => node with { Icon = 0 })], [.. bare.Select(node => node with { Icon = 1 })] }
+                .Select(shown =>
+                {
+                    var owner = new NodeCanvas();
+                    string none = "";
+                    ImGui.NewFrame(); ShortcutInput.BeginFrame(true);
+                    ImGui.SetNextWindowPos(Vector2.Zero); ImGui.SetNextWindowSize(io.DisplaySize);
+                    ImGui.Begin("canvas-icons", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove);
+                    owner.Draw("icons", shown, chain, false, ref none, new());
+                    ImGui.End(); ImGui.Render();
+                    return string.Join(";", owner.Positions.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => $"{pair.Key}={pair.Value}"));
+                }).ToArray();
+            Check(layouts.Distinct().Count() == 1 && layouts[0].Length != 0, "A node with an icon laid out with another size: " + string.Join(" | ", layouts));
+            Console.WriteLine("mission_canvas fast_drag=pass moved_ports=pass detach=pass reconnect=atomic blur=cancelled capture=cancelled icons=same_layout");
         }
         finally { ShortcutInput.Map = oldMap; ShortcutInput.Suspended = oldSuspended; ImGui.DestroyContext(context); }
     }

@@ -5,11 +5,13 @@ namespace SunriseStudio.Formats;
 
 public sealed partial class InvestmentCatalog
 {
-    /** Ordinary socket blocks hold 80-byte rows and at most 12 instance lanes. */
-    private const uint SocketBlockClass = 0x808077C1, SocketRowClass = 0x808077C4;
+    /** Ordinary socket blocks hold 80-byte rows and at most 12 instance lanes. An item points to its block from +104. */
+    internal const uint SocketBlockClass = 0x808077C1, SocketRowClass = 0x808077C4;
+    internal const int SocketField = 104;
     /** Embedded plug choices carry an item index and an expression array in 32 bytes. */
     private const uint SocketMemberClass = 0x80802E03, SocketExpressionClass = 0x80807D31;
-    private const int SocketStride = 80, SocketMemberStride = 32, SocketMemberDescriptor = 64;
+    internal const int SocketStride = 80;
+    private const int SocketMemberStride = 32, SocketMemberDescriptor = 64;
 
     /** Only embedded choices provide a template that stays inside this item. */
     public IReadOnlyList<ushort> SocketPlugTemplates(uint tag, ReadOnlyMemory<byte> current,
@@ -135,7 +137,7 @@ public sealed partial class InvestmentCatalog
         var reader = new TagReader(current);
         if (!reader.Has(0, 188) || reader.U64(0) != (ulong)current.Length)
             throw new InvalidDataException("Item size header is invalid.");
-        int block = reader.Relative(104);
+        int block = reader.Relative(SocketField);
         if (block < 4 || !reader.Has(block, 32) || reader.U32(block - 4) != SocketBlockClass)
             throw new InvalidDataException("Item socket block has an unsupported layout.");
         var rows = reader.Array(block, SocketRowClass, SocketStride);

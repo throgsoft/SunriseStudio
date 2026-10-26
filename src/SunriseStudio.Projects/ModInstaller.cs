@@ -329,7 +329,8 @@ public static partial class ModInstaller
             && !(path ?? "").Contains('\\');
     }
 
-    private static bool IsStartupPackage(string name) => name.Contains("_unp1_", StringComparison.OrdinalIgnoreCase);
+    /** True for a package the game reads at startup, which a mod cannot replace. */
+    public static bool IsStartupPackage(string name) => name.Contains("_unp1_", StringComparison.OrdinalIgnoreCase);
 
     private static InvalidOperationException StartupRefusal(IEnumerable<string> packages) =>
         new($"A mod cannot replace startup package {string.Join(", ", packages)}. Revert those edits or use Build packages.");
